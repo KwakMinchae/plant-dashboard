@@ -196,10 +196,13 @@ CHART_BASE = dict(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(8,12,20,.8)"
                   margin=dict(l=10,r=10,t=40,b=10))
 
 def apply_grid(fig, rows=None):
-    rows = rows or [1]
-    for r in rows:
-        fig.update_xaxes(gridcolor="#0f1928", zeroline=False, row=r)
-        fig.update_yaxes(gridcolor="#0f1928", zeroline=False, row=r)
+    if rows:
+        for r in rows:
+            fig.update_xaxes(gridcolor="#0f1928", zeroline=False, row=r)
+            fig.update_yaxes(gridcolor="#0f1928", zeroline=False, row=r)
+    else:
+        fig.update_xaxes(gridcolor="#0f1928", zeroline=False)
+        fig.update_yaxes(gridcolor="#0f1928", zeroline=False)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HEADER
