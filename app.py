@@ -567,72 +567,81 @@ with TAB_ADV:
 """)
     st.markdown("---")
 
-    # ── FIGURE 3 — Machine Status Timeline + Current overlay ─────────────────
-    st.markdown("#### Figure 3 — Machine Status and Motor Current Over Time")
+    # ── FIGURE 3 — Per-machine dual-axis: Vibration + FAULT dots + Rejection Rate
+    st.markdown("#### Figure 3 — Machine Health Dashboard: Vibration & Quality Trends (Per Machine)")
 
-    n_machines = len(sel_machines)
-    fig_f3 = make_subplots(rows=n_machines, cols=1, shared_xaxes=True,
-        subplot_titles=[f"{m} Status" for m in sel_machines],
-        vertical_spacing=0.08)
-
-    STATUS_BG = {"RUNNING": "rgba(22,163,74,.25)", "IDLE": "rgba(202,138,4,.20)", "FAULT": "rgba(220,38,38,.35)"}
-
-    for i, mach in enumerate(sel_machines, start=1):
+    for mach in sel_machines:
         sub = df[df["machine_id"]==mach].sort_values("timestamp").copy()
-        sub["status_num"] = sub["status"].map({"RUNNING":1,"IDLE":0.5,"FAULT":0})
+        if sub.empty:
+            continue
 
-        # Shaded status regions via vrect
-        if not sub.empty:
-            prev_status = sub.iloc[0]["status"]
-            seg_start   = sub.iloc[0]["timestamp"]
-            for _, row_r in sub.iterrows():
-                if row_r["status"] != prev_status:
-                    fig_f3.add_vrect(x0=seg_start, x1=row_r["timestamp"],
-                        fillcolor=STATUS_BG.get(prev_status,"rgba(0,0,0,0)"),
-                        layer="below", line_width=0, row=i, col=1)
-                    seg_start   = row_r["timestamp"]
-                    prev_status = row_r["status"]
-            # final segment
-            fig_f3.add_vrect(x0=seg_start, x1=sub.iloc[-1]["timestamp"],
-                fillcolor=STATUS_BG.get(prev_status,"rgba(0,0,0,0)"),
-                layer="below", line_width=0, row=i, col=1)
+        fault_sub = sub[sub["status"]=="FAULT"]
 
-        # Current line
-        fig_f3.add_trace(go.Scatter(x=sub["timestamp"], y=sub["current_a"],
-            name=f"{mach} Current" if i==1 else None,
-            showlegend=(i==1),
-            line=dict(color="#3b82f6", width=1.5),
-            hovertemplate=f"<b>{mach}</b> %{{x|%b %d %H:%M}}<br>Current: %{{y:.1f}} A<extra></extra>"),
-            row=i, col=1)
+        # Dual y-axis subplot: y1 = vibration, y2 = rejection rate
+        fig_f3m = make_subplots(specs=[[{"secondary_y": True}]])
 
-        # Annotate current spikes above cur_thresh
-        spikes = sub[sub["current_a"] > cur_thresh].copy()
-        if not spikes.empty:
-            for _, sp in spikes.iterrows():
-                fig_f3.add_annotation(x=sp["timestamp"], y=sp["current_a"],
-                    text=f"{sp['current_a']:.0f}A",
-                    font=dict(color="#f87171", size=9, family="IBM Plex Mono"),
-                    showarrow=True, arrowcolor="#f87171", arrowsize=.6, arrowwidth=1,
-                    ax=0, ay=-20, row=i, col=1)
+        # Vibration line (left axis, blue)
+        fig_f3m.add_trace(go.Scatter(
+            x=sub["timestamp"], y=sub["vibration_mm_s"],
+            name="Vibration (mm/s)",
+            line=dict(color="#93c5fd", width=1.5),
+            hovertemplate="%{x|%b %d %H:%M}<br>Vib: %{y:.2f} mm/s<extra></extra>"),
+            secondary_y=False)
 
-        fig_f3.update_yaxes(title_text="Current (A)", row=i, col=1,
-            gridcolor="#0f1928", zeroline=False, range=[0, sub["current_a"].max()*1.15 if not sub.empty else 90])
+        # FAULT dots (black circles at vibration height)
+        if not fault_sub.empty:
+            fig_f3m.add_trace(go.Scatter(
+                x=fault_sub["timestamp"], y=fault_sub["vibration_mm_s"],
+                mode="markers", name="FAULT Status Triggered",
+                marker=dict(color="#111827", size=9, symbol="circle",
+                            line=dict(color="#c8d8e8", width=1)),
+                hovertemplate="<b>FAULT</b> %{x|%b %d %H:%M}<br>Vib: %{y:.2f} mm/s<extra></extra>"),
+                secondary_y=False)
 
-    # Legend entries for status bands (manual)
-    for label, col in [("RUNNING","rgba(22,163,74,.5)"),("IDLE","rgba(202,138,4,.45)"),("FAULT","rgba(220,38,38,.6)")]:
-        fig_f3.add_trace(go.Scatter(x=[None],y=[None],mode="markers",name=label,
-            marker=dict(color=col,size=10,symbol="square")))
+        # Rejection rate line (right axis, red dashed)
+        fig_f3m.add_trace(go.Scatter(
+            x=sub["timestamp"], y=sub["rejection_rate"],
+            name="Rejection Rate (%)",
+            line=dict(color="#ef4444", width=1.5, dash="dash"),
+            hovertemplate="%{x|%b %d %H:%M}<br>Rejection: %{y:.1f}%<extra></extra>"),
+            secondary_y=True)
 
-    fig_f3.update_layout(**CHART_BASE, height=120*n_machines + 80, hovermode="x unified",
-        title=dict(text="Machine Status and Motor Current Over Time",font_color="#8899aa",font_size=13),
-        legend=dict(bgcolor="rgba(0,0,0,0)",font_size=11,orientation="h",y=-0.06))
-    fig_f3.update_xaxes(gridcolor="#0f1928", zeroline=False)
-    st.plotly_chart(fig_f3, use_container_width=True)
+        # Critical vibration threshold line
+        fig_f3m.add_hline(y=vib_thresh, line_color="#dc2626", line_dash="dot",
+            annotation_text=f"Critical {vib_thresh} mm/s",
+            annotation_font_color="#dc2626", annotation_position="top right",
+            secondary_y=False)
+
+        fig_f3m.update_layout(
+            **CHART_BASE,
+            height=320,
+            hovermode="x unified",
+            title=dict(text=f"Machine Health Dashboard: {mach} (Vibration & Quality Trends)",
+                       font_color="#8899aa", font_size=13),
+            legend=dict(bgcolor="rgba(0,0,0,0)", font_size=11,
+                        orientation="h", y=1.12),
+        )
+        fig_f3m.update_xaxes(title_text="Timestamp", gridcolor="#0f1928", zeroline=False)
+        fig_f3m.update_yaxes(title_text="Vibration Level (mm/s)", gridcolor="#0f1928",
+                              zeroline=False, range=[0, sub["vibration_mm_s"].max()*1.2],
+                              secondary_y=False)
+        fig_f3m.update_yaxes(title_text="Rejection Rate (%)", gridcolor="#0f1928",
+                              zeroline=False, range=[0, 100],
+                              tickfont=dict(color="#ef4444"),
+                              title_font=dict(color="#ef4444"),
+                              secondary_y=True)
+
+        st.plotly_chart(fig_f3m, use_container_width=True, config={"displayModeBar": False})
+
+    # Observation insight
+    fault_with_high_vib = df[(df["status"]=="FAULT") & (df["vibration_mm_s"]>vib_thresh)]
+    fault_with_low_vib  = df[(df["status"]=="FAULT") & (df["vibration_mm_s"]<=vib_thresh)]
     st.markdown(f"""
-> **Observation:** Green bands = RUNNING, Yellow = IDLE, Red = FAULT. Current spikes above **{cur_thresh:.0f} A**
-> (labelled) are annotated. FAULT periods visually correlate with current spikes, confirming
-> electrical overcurrent as a co-trigger. Short IDLE periods between FAULT and RUNNING suggest
-> automatic reset behaviour rather than manual operator intervention.
+> **Observation:** Each chart shows vibration (blue, left axis) and rejection rate (red dashed, right axis)
+> with FAULT events marked as black dots. **{len(fault_with_high_vib)}** fault(s) coincide with vibration
+> above {vib_thresh:.0f} mm/s, while **{len(fault_with_low_vib)}** fault(s) occurred at lower vibration —
+> likely electrical overcurrent triggers. Rejection rate spikes (red dashes reaching 100%) align closely
+> with FAULT events, confirming faults directly impact product quality.
 """)
     st.markdown("---")
 
