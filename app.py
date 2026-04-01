@@ -302,7 +302,22 @@ with TAB_MAIN:
 
     # ── PRODUCTION + CORRELATION + RISK ──────────────────────────────────────
     st.markdown('<div class="sh">🏗️ PRODUCTION & CORRELATION</div>', unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([2.5,2,2])
+    c1, c2, c3, c4 = st.columns([2,1.8,1.8,1.8])
+    with c4:
+        st.markdown("**Status Distribution (hrs)**")
+        status_hrs = df.groupby(["machine_id","status"]).size().reset_index(name="hours")
+        status_colors_bar = {"FAULT":"#ef4444","IDLE":"#9ca3af","RUNNING":"#3b82f6"}
+        fos = go.Figure()
+        for st_opt in ["FAULT","IDLE","RUNNING"]:
+            sub = status_hrs[status_hrs["status"]==st_opt]
+            fos.add_trace(go.Bar(name=st_opt, x=sub["machine_id"], y=sub["hours"],
+                marker_color=status_colors_bar[st_opt]))
+        fos.update_layout(**CHART_BASE, height=290, barmode="group",
+            xaxis_title="Machine", yaxis_title="Hours",
+            legend=dict(bgcolor="rgba(0,0,0,0)", font_size=10))
+        apply_grid(fos)
+        st.plotly_chart(fos, use_container_width=True)
+        st.caption("M1 has disproportionately high fault hours.")
     with c1:
         st.markdown("**Production by Shift**")
         sdf = df.groupby(["shift","machine_id"])[["produced_units","rejected_units"]].sum().reset_index()
@@ -693,6 +708,37 @@ with TAB_ADV:
 > **{better} shift** performs marginally better. M3 has the highest rejection rate across both shifts.
 """)
 
+    # ── FIGURE 6 — Operational Status Distribution by Machine ────────────────
+    st.markdown("#### Figure 6 — Operational Status Distribution by Machine (hrs)")
+
+    status_hrs_adv = df.groupby(["machine_id","status"]).size().reset_index(name="hours")
+    fig_f6 = go.Figure()
+    for st_opt, col_f6 in [("FAULT","#ef4444"),("IDLE","#9ca3af"),("RUNNING","#3b82f6")]:
+        sub = status_hrs_adv[status_hrs_adv["status"]==st_opt]
+        fig_f6.add_trace(go.Bar(
+            name=st_opt, x=sub["machine_id"], y=sub["hours"],
+            marker_color=col_f6,
+            text=sub["hours"], textposition="outside",
+            textfont=dict(family="IBM Plex Mono", size=11)))
+    fig_f6.update_layout(**CHART_BASE, height=480, barmode="group",
+        xaxis_title="Machine", yaxis_title="Operating Hours",
+        title=dict(text="Operational Status Distribution by Machine (hrs)",
+                   font_color="#8899aa", font_size=13),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font_size=12))
+    apply_grid(fig_f6)
+    st.plotly_chart(fig_f6, use_container_width=True)
+
+    m1_fault = status_hrs_adv[(status_hrs_adv["machine_id"]=="M1") & (status_hrs_adv["status"]=="FAULT")]["hours"].sum()
+    m2_fault = status_hrs_adv[(status_hrs_adv["machine_id"]=="M2") & (status_hrs_adv["status"]=="FAULT")]["hours"].sum()
+    m3_fault = status_hrs_adv[(status_hrs_adv["machine_id"]=="M3") & (status_hrs_adv["status"]=="FAULT")]["hours"].sum()
+    st.markdown(f"""
+> **Observation:** M1 accumulated **{m1_fault} fault hours** — significantly higher than
+> M2 ({m2_fault} hrs) and M3 ({m3_fault} hrs), confirming M1 as the highest-priority maintenance target.
+> RUNNING hours are broadly similar across machines, meaning M1's faults are replacing productive time
+> rather than idle time.
+""")
+    st.markdown("---")
+
     # ── Summary ───────────────────────────────────────────────────────────────
     st.markdown("---")
     st.markdown('<div class="sh">📋 ANALYSIS SUMMARY</div>', unsafe_allow_html=True)
@@ -704,6 +750,7 @@ with TAB_ADV:
 | **Fig 3** — Health: Vibration (mm/s) & Rejection (%) | FAULT events co-occur with rejection spikes per machine |
 | **Fig 4** — Vibration Distribution (mm/s) | FAULT median {fault_med:.1f} mm/s vs RUNNING {run_med:.1f} mm/s — {fault_med/run_med:.1f}× higher |
 | **Fig 5** — Current (A) vs Vibration (mm/s) & Rejection (%) | Dual threshold exceedance = strongest fault predictor |
+| **Fig 6** — Status Distribution (hrs) | M1 fault hours ({m1_fault} hrs) highest — priority maintenance target |
 """)
 
 # ─────────────────────────────────────────────────────────────────────────────
