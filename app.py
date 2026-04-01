@@ -76,8 +76,11 @@ def load_data(path):
     df  = pd.read_excel(path, engine="openpyxl") if ext in (".xlsm",".xlsx") else pd.read_csv(path)
     df["timestamp"]      = pd.to_datetime(df["timestamp"])
     df["date"]           = df["timestamp"].dt.date
-    df["rejection_rate"] = np.where(df["produced_units"]>0,
-                                    df["rejected_units"]/df["produced_units"]*100, 0)
+    df["rejection_rate"] = np.where(
+        df["status"]=="FAULT", 100,
+        np.where(df["produced_units"]>0,
+                 df["rejected_units"]/df["produced_units"]*100, 0)
+    )
     return df
 
 for p in [DATA_FILE, f"data/{DATA_FILE}", f"/mnt/user-data/uploads/{DATA_FILE}"]:
@@ -600,6 +603,10 @@ with TAB_ADV:
 > **{len(fault_lo)}** fault(s) occurred at lower vibration — suggesting electrical overcurrent triggers.
 > Rejection rate spikes (red dashes) closely align with fault events, confirming direct quality impact.
 """)
+    st.info("""📌 **Rejection Rate Definition used in Figure 3:**
+- `RUNNING` → `rejected_units / produced_units × 100%` — actual defect rate from raw data
+- `FAULT` → `100%` — machine is down; zero usable output, treated as total production loss
+- `IDLE` → calculated from raw data (typically 0% as no units are produced)""")
     st.markdown("---")
 
     # ── FIGURE 4 — Vibration boxplot by status ────────────────────────────────
