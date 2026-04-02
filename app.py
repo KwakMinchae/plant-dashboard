@@ -496,23 +496,129 @@ with TAB_MAIN:
 
     st.markdown("---")
 
-    # ── ALERTS LOG — Fix #7: full detail table still here for reference ───────
-    st.markdown('<div class="sh-primary">Anomaly Alerts Log</div>', unsafe_allow_html=True)
+    # ── SHIFT COMPARISON SUMMARY (5.2.4) ─────────────────────────────────────
+    st.markdown('<div class="sh-primary">Shift Comparison Summary</div>', unsafe_allow_html=True)
+
+    shift_summary = df.groupby("shift").agg(
+        total_units=("produced_units","sum"),
+        rejected   =("rejected_units","sum"),
+        fault_hrs  =("status", lambda x:(x=="FAULT").sum()),
+        uptime_pct =("status", lambda x:(x=="RUNNING").sum()/len(x)*100),
+    ).reset_index()
+    shift_summary["yield_pct"] = (
+        (shift_summary["total_units"]-shift_summary["rejected"]) /
+        shift_summary["total_units"].replace(0,1)*100).round(1)
+    shift_summary["rej_rate"] = (
+        shift_summary["rejected"]/shift_summary["total_units"].replace(0,1)*100).round(2)
+
+    vals_day   = shift_summary[shift_summary["shift"]=="Day"].iloc[0] if "Day" in shift_summary["shift"].values else None
+    vals_night = shift_summary[shift_summary["shift"]=="Night"].iloc[0] if "Night" in shift_summary["shift"].values else None
+
+    if vals_day is not None and vals_night is not None:
+        sc1,sc2,sc3,sc4,sc5 = st.columns(5)
+        def scard(col, label, day_v, night_v, fmt, lower_is_better=False):
+            delta_pct = ((day_v - night_v) / max(abs(night_v),0.001)) * 100
+            better = (delta_pct > 0 and not lower_is_better) or (delta_pct < 0 and lower_is_better)
+            arrow = "▲" if delta_pct > 0 else "▼"
+            color = "#4ade80" if better else "#f87171"
+            col.markdown(f"""<div style="background:{T["kpi_bg"]};border:1px solid {T["kpi_border"]};
+                border-radius:12px;padding:14px 10px;text-align:center">
+                <div style="font-size:10px;color:{T["text_dim"]};font-family:IBM Plex Mono,monospace;
+                    letter-spacing:.1em;margin-bottom:6px">{label}</div>
+                <div style="font-size:13px;font-weight:700;color:{T["text"]}">☀️ {fmt.format(day_v)}</div>
+                <div style="font-size:13px;font-weight:700;color:{T["text"]};margin-top:2px">🌙 {fmt.format(night_v)}</div>
+                <div style="font-size:11px;color:{color};margin-top:4px">{arrow} Day {abs(delta_pct):.1f}% {"better" if better else "worse"}</div>
+            </div>""", unsafe_allow_html=True)
+        scard(sc1,"📦 UNITS PRODUCED",   int(vals_day["total_units"]), int(vals_night["total_units"]), "{:,}")
+        scard(sc2,"✅ YIELD RATE",        float(vals_day["yield_pct"]),  float(vals_night["yield_pct"]),  "{:.1f}%")
+        scard(sc3,"❌ REJECTION RATE",    float(vals_day["rej_rate"]),   float(vals_night["rej_rate"]),   "{:.2f}%", lower_is_better=True)
+        scard(sc4,"🚨 FAULT HOURS",       int(vals_day["fault_hrs"]),   int(vals_night["fault_hrs"]),    "{}", lower_is_better=True)
+        scard(sc5,"⏱ UPTIME",            float(vals_day["uptime_pct"]), float(vals_night["uptime_pct"]), "{:.1f}%")
+        insight("Day shift outperforms Night on units produced (+7.6%) despite near-equal fault rates — "
+                "likely driven by supervision intensity and scheduling rather than machine condition. "
+                "Green = Day better · Red = Night better.")
+    st.markdown("---")
+
+    # ── PRODUCTION QUALITY TRACKER (5.2.3) ───────────────────────────────────
+    st.markdown('<div class="sh-primary">Production Quality Tracker</div>', unsafe_allow_html=True)
+
+    rej_thresh_pct = st.slider("Rejection rate alert threshold (%)", 1.0, 20.0, 5.0, 0.5,
+                               key="rej_thresh_slider")
+
+    fig_qual = go.Figure()
+    for mach in sel_machines:
+        sub = df[(df["machine_id"]==mach) & (df["status"]=="RUNNING")].sort_values("timestamp")
+        if sub.empty: continue
+        c = MACH_COLORS.get(mach,"#aaa")
+        rej_run = sub["rejected_units"] / sub["produced_units"].replace(0,1) * 100
+        # bar chart — colour spikes red if above threshold
+        colors_bar = ["#dc2626" if v > rej_thresh_pct else c for v in rej_run]
+        fig_qual.add_trace(go.Bar(
+            x=sub["timestamp"], y=rej_run,
+            name=mach, marker_color=colors_bar, opacity=0.8,
+            hovertemplate=f"<b>{mach}</b> %{{x|%b %d %H:%M}}<br>Rejection: %{{y:.1f}}%<extra></extra>"))
+
+    fig_qual.add_hline(y=rej_thresh_pct, line_color="#dc2626", line_dash="dash",
+        annotation_text=f"Alert threshold: {rej_thresh_pct:.1f}%",
+        annotation_font_color="#dc2626", annotation_position="top right")
+    fig_qual.update_layout(**CHART_BASE, height=320, barmode="overlay",
+        xaxis_title="Timestamp", yaxis_title="Rejection Rate (%)",
+        title=dict(text="Rolling Rejection Rate per Hour (RUNNING state only)",
+                   font_color="#8899aa", font_size=13),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font_size=11))
+    apply_grid(fig_qual)
+    st.plotly_chart(fig_qual, use_container_width=True)
+    insight(f"Bars show per-hour rejection rate during RUNNING state only. "
+            f"<b style='color:#dc2626'>Red bars = rejection rate exceeded {rej_thresh_pct:.1f}% threshold.</b> "
+            "Adjust the threshold slider above to match your quality targets. "
+            "Fault-state hours (rejection = 100%) are excluded to show genuine quality variation during operation.")
+    st.markdown("---")
+
+    # ── FAULT ALERT PANEL with Severity (5.2.2) ──────────────────────────────
+    st.markdown('<div class="sh-primary">Fault Alert Panel</div>', unsafe_allow_html=True)
+
+    def get_severity(row):
+        both = row["current_a"] > cur_thresh and row["vibration_mm_s"] > vib_thresh
+        if both or row["status"] == "FAULT": return "🔴 HIGH"
+        if row["current_a"] > cur_thresh or row["vibration_mm_s"] > vib_thresh: return "🟠 MEDIUM"
+        return "🟡 LOW"
 
     if alerts_df.empty:
         st.success("✅ No anomalies detected in the current selection.")
     else:
         disp = alerts_df.copy()
+        disp["Severity"]   = disp.apply(get_severity, axis=1)
+        high_c   = (disp["Severity"]=="🔴 HIGH").sum()
+        medium_c = (disp["Severity"]=="🟠 MEDIUM").sum()
+        low_c    = (disp["Severity"]=="🟡 LOW").sum()
+
+        sev1,sev2,sev3 = st.columns(3)
+        for col_s, label_s, count_s, sub_s, bg_s, bc_s, tc_s in [
+            (sev1,"🔴 HIGH SEVERITY",   high_c,   "Both sensors exceeded OR FAULT state","#1a0808","#dc2626","#f87171"),
+            (sev2,"🟠 MEDIUM SEVERITY", medium_c, "Single sensor exceeded",              "#1a1000","#f97316","#fbbf24"),
+            (sev3,"🟡 LOW SEVERITY",    low_c,    "Quality threshold exceeded",          "#111800","#ca8a04","#fde047"),
+        ]:
+            col_s.markdown(f"""<div style="background:{bg_s};border:1px solid {bc_s};border-radius:10px;
+                padding:14px;text-align:center">
+                <div style="font-size:10px;color:#888;font-family:IBM Plex Mono,monospace;
+                    letter-spacing:.1em">{label_s}</div>
+                <div style="font-size:2rem;font-weight:800;color:{tc_s}">{count_s}</div>
+                <div style="font-size:11px;color:#666">{sub_s}</div>
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
         disp["Triggered By"] = disp.apply(lambda r: " | ".join(filter(None,[
-            f"⚡ Current {r['current_a']:.1f}A > {cur_thresh:.0f}A"          if r["current_a"]>cur_thresh else "",
-            f"📳 Vibration {r['vibration_mm_s']:.2f} > {vib_thresh:.0f}mm/s"  if r["vibration_mm_s"]>vib_thresh else "",
-            f"❌ Rejection {r['rejection_rate']:.1f}% > 10%"                  if (r["status"]!="FAULT" and r["rejection_rate"]>10) else "",
+            f"⚡ Current {r['current_a']:.1f}A > {cur_thresh:.0f}A"         if r["current_a"]>cur_thresh else "",
+            f"📳 Vibration {r['vibration_mm_s']:.2f} > {vib_thresh:.0f}mm/s" if r["vibration_mm_s"]>vib_thresh else "",
+            f"❌ Rejection {r['rejection_rate']:.1f}% > 10%"                 if (r["status"]!="FAULT" and r["rejection_rate"]>10) else "",
         ])),axis=1)
-        disp = disp[["timestamp","machine_id","status","current_a","vibration_mm_s","rejection_rate","Triggered By"]]
-        disp.columns = ["Timestamp","Machine","Status","Current (A)","Vibration (mm/s)","Rejection (%)","Triggered By"]
-        disp["Timestamp"]     = pd.to_datetime(disp["Timestamp"]).dt.strftime("%Y-%m-%d %H:%M")
-        disp["Rejection (%)"] = disp["Rejection (%)"].round(2)
-        st.dataframe(disp.sort_values("Timestamp",ascending=False),
+        disp_show = disp[["timestamp","machine_id","status","Severity","current_a",
+                           "vibration_mm_s","rejection_rate","Triggered By"]].copy()
+        disp_show.columns = ["Timestamp","Machine","Status","Severity",
+                             "Current (A)","Vibration (mm/s)","Rejection (%)","Triggered By"]
+        disp_show["Timestamp"]     = pd.to_datetime(disp_show["Timestamp"]).dt.strftime("%Y-%m-%d %H:%M")
+        disp_show["Rejection (%)"] = disp_show["Rejection (%)"].round(2)
+        st.dataframe(disp_show.sort_values("Timestamp",ascending=False),
                      use_container_width=True, hide_index=True,
                      column_config={
                          "Current (A)":     st.column_config.NumberColumn(format="%.1f A"),
@@ -520,8 +626,10 @@ with TAB_MAIN:
                          "Rejection (%)":   st.column_config.NumberColumn(format="%.2f%%"),
                      })
         st.download_button("⬇️ Export Alerts as CSV",
-            disp.to_csv(index=False).encode(),
+            disp_show.to_csv(index=False).encode(),
             file_name=f"plant_alerts_{d_start}_{d_end}.csv", mime="text/csv")
+        insight("<b>Severity:</b> HIGH = both sensors exceeded or FAULT state — act immediately. "
+                "MEDIUM = single sensor exceeded — monitor closely. LOW = quality threshold only — review process.")
     st.markdown("---")
 
     # ── RECOMMENDATIONS ──────────────────────────────────────────────────────
