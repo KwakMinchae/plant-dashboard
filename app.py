@@ -691,35 +691,85 @@ with TAB_ADV:
     st.markdown("---")
 
     # ── FIGURE 4 ──────────────────────────────────────────────────────────────
-    st.markdown("#### Figure 4 — Vibration Distribution by Status (mm/s)")
+    st.markdown("#### Figure 4 — Sensor Distribution by Status (mm/s, A)")
 
-    fig_f4 = go.Figure()
     box_colors = {"IDLE":"#2d6a4f","RUNNING":"#c06030","FAULT":"#6272a4"}
-    for status in ["IDLE","RUNNING","FAULT"]:
-        sub = df[df["status"]==status]["vibration_mm_s"]
+    f4c1, f4c2 = st.columns(2)
+
+    with f4c1:
+        fig_f4a = go.Figure()
+        for status in ["IDLE","RUNNING","FAULT"]:
+            sub = df[df["status"]==status]["vibration_mm_s"]
+            if sub.empty: continue
+            fig_f4a.add_trace(go.Box(y=sub, name=status, boxmean=True,
+                marker_color=box_colors.get(status,"#aaa"),
+                line_color=box_colors.get(status,"#aaa"),
+                fillcolor=box_colors.get(status,"#aaa"),
+                opacity=0.75,
+                hovertemplate=f"<b>{status}</b><br>%{{y:.2f}} mm/s<extra></extra>"))
+        fig_f4a.add_hline(y=vib_thresh, line_color="#dc2626", line_dash="dot",
+            annotation_text=f"Critical {vib_thresh:.0f} mm/s", annotation_font_color="#dc2626")
+        fig_f4a.update_layout(**CHART_BASE, height=460,
+            xaxis_title="Machine Status", yaxis_title="Vibration (mm/s)",
+            title=dict(text="Vibration Distribution by Status (mm/s)",
+                       font_color="#8899aa", font_size=13))
+        apply_grid(fig_f4a)
+        st.plotly_chart(fig_f4a, use_container_width=True)
+
+    with f4c2:
+        fig_f4b = go.Figure()
+        for status in ["IDLE","RUNNING","FAULT"]:
+            sub = df[df["status"]==status]["current_a"]
+            if sub.empty: continue
+            fig_f4b.add_trace(go.Box(y=sub, name=status, boxmean=True,
+                marker_color=box_colors.get(status,"#aaa"),
+                line_color=box_colors.get(status,"#aaa"),
+                fillcolor=box_colors.get(status,"#aaa"),
+                opacity=0.75,
+                hovertemplate=f"<b>{status}</b><br>%{{y:.1f}} A<extra></extra>"))
+        fig_f4b.add_hline(y=cur_thresh, line_color="#dc2626", line_dash="dot",
+            annotation_text=f"Critical {cur_thresh:.0f} A", annotation_font_color="#dc2626")
+        fig_f4b.update_layout(**CHART_BASE, height=460,
+            xaxis_title="Machine Status", yaxis_title="Current (A)",
+            title=dict(text="Current Distribution by Status (A)",
+                       font_color="#8899aa", font_size=13))
+        apply_grid(fig_f4b)
+        st.plotly_chart(fig_f4b, use_container_width=True)
+
+    # Summary table
+    summary_rows = []
+    for status in ["IDLE","FAULT","RUNNING"]:
+        sub = df[df["status"]==status]
         if sub.empty: continue
-        fig_f4.add_trace(go.Box(y=sub,name=status,boxmean=True,
-            marker_color=box_colors.get(status,"#aaa"),
-            line_color=box_colors.get(status,"#aaa"),
-            fillcolor=box_colors.get(status,"#aaa"),
-            opacity=0.75,
-            hovertemplate=f"<b>{status}</b><br>%{{y:.2f}} mm/s<extra></extra>"))
-    fig_f4.add_hline(y=vib_thresh,line_color="#dc2626",line_dash="dot",
-        annotation_text=f"Critical {vib_thresh:.0f}mm/s",annotation_font_color="#dc2626")
-    fig_f4.update_layout(**CHART_BASE,height=500,
-        xaxis_title="Machine Status",yaxis_title="Vibration (mm/s)",
-        title=dict(text="Vibration Distribution by Status (mm/s)",
-                   font_color="#8899aa",font_size=13))
-    apply_grid(fig_f4)
-    st.plotly_chart(fig_f4, use_container_width=True)
+        summary_rows.append({
+            "Status": status.capitalize(),
+            "Avg Current (A)": round(sub["current_a"].mean(), 2),
+            "Avg Vibration (mm/s)": round(sub["vibration_mm_s"].mean(), 2),
+        })
+    total_row = {
+        "Status": "Total",
+        "Avg Current (A)": round(df["current_a"].mean(), 2),
+        "Avg Vibration (mm/s)": round(df["vibration_mm_s"].mean(), 2),
+    }
+    summary_rows.append(total_row)
+    summary_df = pd.DataFrame(summary_rows)
+
+    st.dataframe(summary_df, use_container_width=True, hide_index=True,
+        column_config={
+            "Avg Current (A)":      st.column_config.NumberColumn(format="%.2f A"),
+            "Avg Vibration (mm/s)": st.column_config.NumberColumn(format="%.2f mm/s"),
+        })
 
     run_med   = df[df["status"]=="RUNNING"]["vibration_mm_s"].median()
     fault_med = df[df["status"]=="FAULT"]["vibration_mm_s"].median() if fault_count>0 else 0
     idle_med  = df[df["status"]=="IDLE"]["vibration_mm_s"].median()
-    insight(f"FAULT median vibration ({fault_med:.1f} mm/s) is <b>{fault_med/run_med:.1f}× higher</b> than "
+    run_cur   = df[df["status"]=="RUNNING"]["current_a"].mean()
+    fault_cur = df[df["status"]=="FAULT"]["current_a"].mean() if fault_count>0 else 0
+    insight(f"<b>Vibration:</b> FAULT median ({fault_med:.1f} mm/s) is {fault_med/run_med:.1f}× higher than "
             f"RUNNING ({run_med:.1f} mm/s) and IDLE ({idle_med:.1f} mm/s). "
-            "IDLE and RUNNING distributions are nearly identical — vibration is not elevated during idle periods. "
-            "The wide FAULT box (IQR) shows fault severity varies greatly from borderline to extreme cases.")
+            f"<b>Current:</b> FAULT average ({fault_cur:.1f} A) is {fault_cur/run_cur:.1f}× higher than "
+            f"RUNNING ({run_cur:.1f} A) — both sensors clearly distinguish fault conditions from normal operation. "
+            "The wide IQR in FAULT boxes shows fault severity varies considerably.")
     st.markdown("---")
 
     # ── FIGURE 5 ──────────────────────────────────────────────────────────────
@@ -825,7 +875,7 @@ with TAB_ADV:
 | **Fig 1** — Vibration & Current (mm/s, A) | {fault_count} FAULT events visible on both sensor panels |
 | **Fig 2** — Vibration vs Rejection (%, RUNNING) | Near-zero correlation r ≈ {r_val:.3f} — vibration does not drive quality |
 | **Fig 3** — Health: Vibration (mm/s) & Rejection (%) | FAULT events co-occur with 100% rejection spikes per machine |
-| **Fig 4** — Vibration Distribution (mm/s) | FAULT median {fault_med:.1f} mm/s vs RUNNING {run_med:.1f} mm/s — {fault_med/run_med:.1f}× higher |
+| **Fig 4** — Sensor Distribution (mm/s, A) | FAULT avg current {fault_cur:.1f} A & vibration {fault_med:.1f} mm/s — both ~{fault_cur/run_cur:.1f}× higher than RUNNING |
 | **Fig 5** — Current (A) vs Vibration (mm/s) & Rejection (%) | Dual-threshold exceedance is the strongest fault predictor |
 | **Fig 6** — Status Distribution (hrs) | M1 fault hours ({m1_fault} hrs) highest — priority maintenance target |
 """)
