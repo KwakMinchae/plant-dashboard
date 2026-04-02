@@ -17,93 +17,117 @@ st.set_page_config(page_title="PlantIQ", page_icon="⚙️",
                    layout="wide", initial_sidebar_state="expanded")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CSS
-# Fix #3: clearer visual hierarchy — section headers now have size variation
-# Fix #11: insight captions styled larger and more visible
+# THEME TOGGLE + CSS
 # ─────────────────────────────────────────────────────────────────────────────
-st.markdown("""
+if "dark_mode" not in st.session_state:
+    st.session_state.dark_mode = True
+
+D = dict(
+    bg="#080c14", sidebar_bg="#0b1020", sidebar_br="#1a2540",
+    text="#c8d8e8", text_dim="#4a6080",
+    kpi_bg="linear-gradient(145deg,#0f1928,#131e30)", kpi_border="#1e3050", kpi_sub="#3a5070",
+    mc_run="#071a10", mc_idle="#1a1500", mc_fault="#180808",
+    mc_m_bg="rgba(255,255,255,.04)", mc_m_label="#3a5070",
+    vib_bar_bg="#0f1928", vib_label="#4a6080",
+    sh_pri_color="#c8d8e8", sh_pri_border="#2563eb",
+    sh_sec_color="#4a6080", sh_sec_border="#1a2540",
+    alert_bg="linear-gradient(135deg,#1a0808,#2a0f0f)", alert_border="#7f1d1d",
+    thresh_bg="#0d1a2e", thresh_border="#1e3a60", thresh_color="#6080a0", thresh_b="#c8d8e8",
+    insight_bg="#0b1422",
+    adv_bg="#0f1928", adv_border="#1e3050", adv_color="#8899aa", adv_b="#c8d8e8",
+    info_bg="#0b1422", info_border="#1a2540", info_b="#60a5fa",
+    scroll_track="#0b1020", scroll_thumb="#1e3050",
+    plot_bg="rgba(8,12,20,.8)", grid_color="#0f1928", font_color="#c8d8e8",
+    badge_run_bg="#14532d", badge_run_fg="#4ade80",
+    badge_idle_bg="#422006", badge_idle_fg="#fbbf24",
+    badge_fault_bg="#450a0a", badge_fault_fg="#f87171",
+)
+L = dict(
+    bg="#f7f5f0", sidebar_bg="#eeeae0", sidebar_br="#d0c8b8",
+    text="#1a1a1a", text_dim="#666",
+    kpi_bg="linear-gradient(145deg,#ffffff,#f0ede6)", kpi_border="#ddd5c8", kpi_sub="#888",
+    mc_run="#f0fdf4", mc_idle="#fefce8", mc_fault="#fff1f1",
+    mc_m_bg="rgba(0,0,0,.04)", mc_m_label="#888",
+    vib_bar_bg="#e0dbd0", vib_label="#888",
+    sh_pri_color="#111", sh_pri_border="#2563eb",
+    sh_sec_color="#888", sh_sec_border="#ddd",
+    alert_bg="linear-gradient(135deg,#fff1f1,#ffe4e4)", alert_border="#fca5a5",
+    thresh_bg="#eef2ff", thresh_border="#c7d2fe", thresh_color="#4a5580", thresh_b="#1a1a1a",
+    insight_bg="#eff6ff",
+    adv_bg="#f0f4ff", adv_border="#c7d2fe", adv_color="#444", adv_b="#111",
+    info_bg="#f0f6ff", info_border="#bcd", info_b="#1d4ed8",
+    scroll_track="#e8e0d0", scroll_thumb="#bbb",
+    plot_bg="rgba(247,245,240,.95)", grid_color="#e8e0d0", font_color="#1a1a1a",
+    badge_run_bg="#dcfce7", badge_run_fg="#166534",
+    badge_idle_bg="#fef9c3", badge_idle_fg="#854d0e",
+    badge_fault_bg="#fee2e2", badge_fault_fg="#991b1b",
+)
+
+T = D if st.session_state.dark_mode else L
+
+st.markdown(f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Syne:wght@700;800&family=Inter:wght@400;500;600&display=swap');
-
-html,body,[data-testid="stAppViewContainer"]{background:#080c14;color:#c8d8e8;font-family:'Inter',sans-serif;}
-[data-testid="stSidebar"]{background:#0b1020;border-right:1px solid #1a2540;}
-h1,h2,h3{font-family:'Syne',sans-serif;}
-
-/* KPI cards */
-.kpi-wrap{background:linear-gradient(145deg,#0f1928,#131e30);border:1px solid #1e3050;border-radius:16px;
-  padding:24px 20px 18px;text-align:center;position:relative;overflow:hidden;
-  transition:transform .25s,box-shadow .25s;}
-.kpi-wrap:hover{transform:translateY(-4px);box-shadow:0 12px 40px rgba(0,120,255,.15);}
-.kpi-wrap::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;
-  background:var(--kpi-accent,#2563eb);border-radius:16px 16px 0 0;}
-.kpi-label{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.12em;
-  color:#4a6080;text-transform:uppercase;margin-bottom:10px;}
-.kpi-value{font-family:'Syne',sans-serif;font-size:2.6rem;font-weight:800;line-height:1;
-  color:var(--kpi-color,#7eb8f7);}
-.kpi-sub{font-size:11px;color:#3a5070;margin-top:8px;font-family:'IBM Plex Mono',monospace;}
-
-/* Machine cards — no gauge below, card is self-contained */
-.mc{border-radius:14px;padding:20px 22px;border-left:4px solid transparent;transition:transform .2s;}
-.mc:hover{transform:translateX(3px);}
-.mc-running{background:#071a10;border-color:#16a34a;}
-.mc-idle{background:#1a1500;border-color:#ca8a04;}
-.mc-fault{background:#180808;border-color:#dc2626;animation:fault-pulse 2s ease-in-out infinite;}
-@keyframes fault-pulse{0%,100%{box-shadow:0 0 0 0 rgba(220,38,38,0);}50%{box-shadow:0 0 0 8px rgba(220,38,38,.15);}}
-.mc-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
-.mc-id{font-family:'Syne',sans-serif;font-size:1.4rem;font-weight:800;}
-.mc-badge{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;
-  letter-spacing:.1em;padding:3px 10px;border-radius:20px;}
-.badge-running{background:#14532d;color:#4ade80;}
-.badge-idle{background:#422006;color:#fbbf24;}
-.badge-fault{background:#450a0a;color:#f87171;}
-.mc-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;}
-.mc-m{background:rgba(255,255,255,.04);border-radius:8px;padding:10px 12px;}
-.mc-m-label{font-size:10px;color:#3a5070;font-family:'IBM Plex Mono',monospace;
-  letter-spacing:.08em;margin-bottom:4px;}
-.mc-m-val{font-size:1.15rem;font-weight:600;}
-.mc-vib-bar-bg{background:#0f1928;border-radius:6px;height:7px;margin-top:14px;}
-.mc-vib-bar{height:100%;border-radius:6px;background:var(--vb-col,#aaa);width:var(--vb-w,0%);}
-.mc-vib-label{font-size:11px;color:#4a6080;margin-top:5px;font-family:'IBM Plex Mono',monospace;}
-.risk-low{color:#4ade80;}.risk-med{color:#fbbf24;}.risk-high{color:#f87171;}
-
-/* Fix #3: section headers — primary vs secondary hierarchy */
-.sh-primary{font-family:'Syne',sans-serif;font-size:1rem;font-weight:700;color:#c8d8e8;
-  border-bottom:2px solid #2563eb;padding-bottom:8px;margin-bottom:18px;letter-spacing:.02em;}
-.sh-secondary{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.15em;
-  color:#4a6080;text-transform:uppercase;border-bottom:1px solid #1a2540;
-  padding-bottom:6px;margin-bottom:14px;}
-
-/* Fix #7: alert banner — prominent */
-.alert-banner{background:linear-gradient(135deg,#1a0808,#2a0f0f);border:1px solid #7f1d1d;
-  border-left:4px solid #ef4444;border-radius:12px;padding:16px 20px;margin-bottom:6px;}
-.alert-banner-title{font-family:'Syne',sans-serif;font-size:1.1rem;font-weight:700;
-  color:#f87171;margin-bottom:4px;}
-.alert-banner-sub{font-size:12px;color:#9a6060;font-family:'IBM Plex Mono',monospace;}
-
-/* Fix #1: threshold info bar always visible */
-.thresh-bar{background:#0d1a2e;border:1px solid #1e3a60;border-radius:8px;
+html,body,[data-testid="stAppViewContainer"]{{background:{T["bg"]};color:{T["text"]};font-family:'Inter',sans-serif;}}
+[data-testid="stSidebar"]{{background:{T["sidebar_bg"]};border-right:1px solid {T["sidebar_br"]};}}
+[data-testid="stSidebar"] *{{color:{T["text"]} !important;}}
+h1,h2,h3{{font-family:'Syne',sans-serif;}}
+.kpi-wrap{{background:{T["kpi_bg"]};border:1px solid {T["kpi_border"]};border-radius:16px;
+  padding:24px 20px 18px;text-align:center;position:relative;overflow:hidden;transition:transform .25s,box-shadow .25s;}}
+.kpi-wrap:hover{{transform:translateY(-4px);box-shadow:0 12px 40px rgba(0,120,255,.12);}}
+.kpi-wrap::before{{content:'';position:absolute;top:0;left:0;right:0;height:3px;
+  background:var(--kpi-accent,#2563eb);border-radius:16px 16px 0 0;}}
+.kpi-label{{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.12em;
+  color:{T["text_dim"]};text-transform:uppercase;margin-bottom:10px;}}
+.kpi-value{{font-family:'Syne',sans-serif;font-size:2.6rem;font-weight:800;line-height:1;color:var(--kpi-color,#2563eb);}}
+.kpi-sub{{font-size:11px;color:{T["kpi_sub"]};margin-top:8px;font-family:'IBM Plex Mono',monospace;}}
+.mc{{border-radius:14px;padding:20px 22px;border-left:4px solid transparent;transition:transform .2s;}}
+.mc:hover{{transform:translateX(3px);}}
+.mc-running{{background:{T["mc_run"]};border-color:#16a34a;}}
+.mc-idle{{background:{T["mc_idle"]};border-color:#ca8a04;}}
+.mc-fault{{background:{T["mc_fault"]};border-color:#dc2626;animation:fault-pulse 2s ease-in-out infinite;}}
+@keyframes fault-pulse{{0%,100%{{box-shadow:0 0 0 0 rgba(220,38,38,0);}}50%{{box-shadow:0 0 0 8px rgba(220,38,38,.15);}}}}
+.mc-head{{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}}
+.mc-id{{font-family:'Syne',sans-serif;font-size:1.4rem;font-weight:800;color:{T["text"]};}}
+.mc-badge{{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.1em;padding:3px 10px;border-radius:20px;}}
+.badge-running{{background:{T["badge_run_bg"]};color:{T["badge_run_fg"]};}}
+.badge-idle{{background:{T["badge_idle_bg"]};color:{T["badge_idle_fg"]};}}
+.badge-fault{{background:{T["badge_fault_bg"]};color:{T["badge_fault_fg"]};}}
+.mc-grid{{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;}}
+.mc-m{{background:{T["mc_m_bg"]};border-radius:8px;padding:10px 12px;}}
+.mc-m-label{{font-size:10px;color:{T["mc_m_label"]};font-family:'IBM Plex Mono',monospace;letter-spacing:.08em;margin-bottom:4px;}}
+.mc-m-val{{font-size:1.15rem;font-weight:600;color:{T["text"]};}}
+.mc-vib-bar-bg{{background:{T["vib_bar_bg"]};border-radius:6px;height:7px;margin-top:14px;}}
+.mc-vib-bar{{height:100%;border-radius:6px;background:var(--vb-col,#aaa);width:var(--vb-w,0%);}}
+.mc-vib-label{{font-size:11px;color:{T["vib_label"]};margin-top:5px;font-family:'IBM Plex Mono',monospace;}}
+.risk-low{{color:#16a34a;}}.risk-med{{color:#ca8a04;}}.risk-high{{color:#dc2626;}}
+.sh-primary{{font-family:'Syne',sans-serif;font-size:1rem;font-weight:700;color:{T["sh_pri_color"]};
+  border-bottom:2px solid {T["sh_pri_border"]};padding-bottom:8px;margin-bottom:18px;letter-spacing:.02em;}}
+.sh-secondary{{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.15em;
+  color:{T["sh_sec_color"]};text-transform:uppercase;border-bottom:1px solid {T["sh_sec_border"]};
+  padding-bottom:6px;margin-bottom:14px;}}
+.alert-banner{{background:{T["alert_bg"]};border:1px solid {T["alert_border"]};
+  border-left:4px solid #ef4444;border-radius:12px;padding:16px 20px;margin-bottom:6px;}}
+.alert-banner-title{{font-family:'Syne',sans-serif;font-size:1.1rem;font-weight:700;color:#dc2626;margin-bottom:4px;}}
+.alert-banner-sub{{font-size:12px;color:#888;font-family:'IBM Plex Mono',monospace;}}
+.thresh-bar{{background:{T["thresh_bg"]};border:1px solid {T["thresh_border"]};border-radius:8px;
   padding:10px 16px;font-family:'IBM Plex Mono',monospace;font-size:11px;
-  color:#6080a0;display:flex;gap:28px;flex-wrap:wrap;margin-bottom:18px;}
-.thresh-bar b{color:#c8d8e8;}
-.thresh-crit{color:#f87171;font-weight:600;}
-
-/* Fix #11: insight text — bigger and visible */
-.insight{background:#0b1422;border-left:3px solid #2563eb;border-radius:0 8px 8px 0;
-  padding:12px 16px;margin:10px 0 16px;font-size:13px;color:#a0b8d0;line-height:1.7;}
-.insight b{color:#c8d8e8;}
-
-/* Advanced analysis intro box */
-.adv-intro{background:#0f1928;border:1px solid #1e3050;border-radius:10px;
-  padding:16px 20px;margin-bottom:24px;font-size:13px;color:#8899aa;line-height:1.7;}
-.adv-intro b{color:#c8d8e8;}
-
-/* Sidebar info box */
-.info-box{background:#0b1422;border:1px solid #1a2540;border-radius:10px;padding:12px;
-  margin:8px 0;font-size:.8rem;line-height:1.7;}
-.info-box b{color:#60a5fa;}.crit{color:#f87171;font-weight:700;}
-
-::-webkit-scrollbar{width:6px;}::-webkit-scrollbar-track{background:#0b1020;}
-::-webkit-scrollbar-thumb{background:#1e3050;border-radius:3px;}
+  color:{T["thresh_color"]};display:flex;gap:28px;flex-wrap:wrap;margin-bottom:18px;}}
+.thresh-bar b{{color:{T["thresh_b"]};}}
+.thresh-crit{{color:#dc2626;font-weight:600;}}
+.insight{{background:{T["insight_bg"]};border-left:3px solid #2563eb;border-radius:0 8px 8px 0;
+  padding:12px 16px;margin:10px 0 16px;font-size:13px;color:{T["text"]};line-height:1.7;}}
+.insight b{{color:{T["text"]};}}
+.adv-intro{{background:{T["adv_bg"]};border:1px solid {T["adv_border"]};border-radius:10px;
+  padding:16px 20px;margin-bottom:24px;font-size:13px;color:{T["adv_color"]};line-height:1.7;}}
+.adv-intro b{{color:{T["adv_b"]};}}
+.info-box{{background:{T["info_bg"]};border:1px solid {T["info_border"]};border-radius:10px;
+  padding:12px;margin:8px 0;font-size:.8rem;line-height:1.7;color:{T["text"]};}}
+.info-box b{{color:{T["info_b"]};}}
+.crit{{color:#dc2626;font-weight:700;}}
+::-webkit-scrollbar{{width:6px;}}
+::-webkit-scrollbar-track{{background:{T["scroll_track"]};}}
+::-webkit-scrollbar-thumb{{background:{T["scroll_thumb"]};border-radius:3px;}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -142,6 +166,13 @@ with st.sidebar:
                 -webkit-background-clip:text;-webkit-text-fill-color:transparent'>⚙️ PlantIQ</div>
     <div style='font-family:IBM Plex Mono,monospace;font-size:10px;color:#2a4060;
                 letter-spacing:.15em'>MANUFACTURING MONITOR</div></div>""", unsafe_allow_html=True)
+
+    # Theme toggle
+    mode_label = "☀️ Switch to Light Mode" if st.session_state.dark_mode else "🌙 Switch to Dark Mode"
+    if st.button(mode_label, use_container_width=True):
+        st.session_state.dark_mode = not st.session_state.dark_mode
+        st.rerun()
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # Fix #10: expanded=True so users see it immediately
     with st.expander("ℹ️ Sensor Guide", expanded=True):
@@ -214,12 +245,12 @@ machine_risk = {m: risk_score(df[df["machine_id"]==m],
 # ─────────────────────────────────────────────────────────────────────────────
 MACH_COLORS = {"M1":"#3b82f6","M2":"#f97316","M3":"#22c55e"}
 
-CHART_BASE = dict(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(8,12,20,.8)",
-                  font_color="#c8d8e8", font_family="IBM Plex Mono",
+CHART_BASE = dict(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor=T["plot_bg"],
+                  font_color=T["font_color"], font_family="IBM Plex Mono",
                   margin=dict(l=10,r=10,t=45,b=10))
 
 def apply_grid(fig, rows=None):
-    kw = dict(gridcolor="#0f1928", zeroline=False)
+    kw = dict(gridcolor=T["grid_color"], zeroline=False)
     if rows:
         for r in rows:
             fig.update_xaxes(**kw, row=r)
@@ -641,49 +672,91 @@ with TAB_ADV:
     st.markdown("---")
 
     # ── FIGURE 3 ──────────────────────────────────────────────────────────────
-    st.markdown("#### Figure 3 — Machine Health: Vibration (mm/s) & Rejection Rate (%)")
+    st.markdown("#### Figure 3 — Machine Health: Vibration (mm/s) & Rejection Rate (%) — All Machines")
 
-    for mach in sel_machines:
+    # Combined chart: 3 rows (one per machine), shared x-axis, dual y-axis per row
+    n_m = len(sel_machines)
+    fig_f3 = make_subplots(
+        rows=n_m, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.06,
+        subplot_titles=[f"{m} — Vibration (mm/s) & Rejection Rate (%)" for m in sel_machines],
+        specs=[[{"secondary_y": True}] for _ in sel_machines],
+    )
+
+    for i, mach in enumerate(sel_machines, start=1):
         sub = df[df["machine_id"]==mach].sort_values("timestamp").copy()
         if sub.empty: continue
         fault_sub = sub[sub["status"]=="FAULT"]
-        fig_f3m = make_subplots(specs=[[{"secondary_y":True}]])
-        fig_f3m.add_trace(go.Scatter(x=sub["timestamp"],y=sub["vibration_mm_s"],
-            name="Vibration (mm/s)",line=dict(color="#93c5fd",width=1.8),
-            hovertemplate="%{x|%b %d %H:%M}<br>Vib: %{y:.2f} mm/s<extra></extra>"),
-            secondary_y=False)
+        mc = MACH_COLORS.get(mach, "#aaa")
+
+        # Vibration line
+        fig_f3.add_trace(go.Scatter(
+            x=sub["timestamp"], y=sub["vibration_mm_s"],
+            name=f"{mach} Vibration" if i==1 else mach,
+            showlegend=(i==1),
+            line=dict(color=mc, width=1.8),
+            hovertemplate=f"<b>{mach}</b> %{{x|%b %d %H:%M}}<br>Vib: %{{y:.2f}} mm/s<extra></extra>"),
+            row=i, col=1, secondary_y=False)
+
+        # FAULT dots
         if not fault_sub.empty:
-            fig_f3m.add_trace(go.Scatter(x=fault_sub["timestamp"],y=fault_sub["vibration_mm_s"],
-                mode="markers",name="FAULT",
-                marker=dict(color="#111827",size=10,symbol="circle",
-                            line=dict(color="#c8d8e8",width=1.5)),
-                hovertemplate="<b>FAULT</b> %{x|%b %d %H:%M}<br>%{y:.2f} mm/s<extra></extra>"),
-                secondary_y=False)
-        fig_f3m.add_trace(go.Scatter(x=sub["timestamp"],y=sub["rejection_rate"],
-            name="Rejection Rate (%)",line=dict(color="#ef4444",width=1.8,dash="dash"),
-            hovertemplate="%{x|%b %d %H:%M}<br>Rejection: %{y:.1f}%<extra></extra>"),
-            secondary_y=True)
-        fig_f3m.add_hline(y=vib_thresh,line_color="#dc2626",line_dash="dot",
-            annotation_text=f"Critical {vib_thresh:.0f}mm/s",
-            annotation_font_color="#dc2626",annotation_position="top right",secondary_y=False)
-        fig_f3m.update_layout(**CHART_BASE,height=400,hovermode="x unified",
-            title=dict(text=f"{mach} — Vibration (mm/s) & Rejection Rate (%)",
-                       font_color="#8899aa",font_size=13),
-            legend=dict(bgcolor="rgba(0,0,0,0)",font_size=11,orientation="h",y=1.12))
-        fig_f3m.update_xaxes(title_text="Timestamp",gridcolor="#0f1928",zeroline=False)
-        fig_f3m.update_yaxes(title_text="Vibration (mm/s)",gridcolor="#0f1928",zeroline=False,
-                              range=[0,sub["vibration_mm_s"].max()*1.2],secondary_y=False)
-        fig_f3m.update_yaxes(title_text="Rejection Rate (%)",gridcolor="#0f1928",zeroline=False,
-                              range=[0,110],tickfont=dict(color="#ef4444"),
-                              title_font=dict(color="#ef4444"),secondary_y=True)
-        st.plotly_chart(fig_f3m,use_container_width=True,config={"displayModeBar":False})
+            fig_f3.add_trace(go.Scatter(
+                x=fault_sub["timestamp"], y=fault_sub["vibration_mm_s"],
+                mode="markers",
+                name="FAULT" if i==1 else "FAULT",
+                showlegend=(i==1),
+                marker=dict(color="#111827", size=10, symbol="circle",
+                            line=dict(color="#c8d8e8", width=1.5)),
+                hovertemplate=f"<b>FAULT {mach}</b> %{{x|%b %d %H:%M}}<br>%{{y:.2f}} mm/s<extra></extra>"),
+                row=i, col=1, secondary_y=False)
+
+        # Rejection rate (right axis)
+        fig_f3.add_trace(go.Scatter(
+            x=sub["timestamp"], y=sub["rejection_rate"],
+            name="Rejection Rate (%)" if i==1 else "Rejection Rate (%)",
+            showlegend=(i==1),
+            line=dict(color="#ef4444", width=1.8, dash="dash"),
+            hovertemplate=f"<b>{mach}</b> %{{x|%b %d %H:%M}}<br>Rejection: %{{y:.1f}}%<extra></extra>"),
+            row=i, col=1, secondary_y=True)
+
+        # Critical vibration threshold line per row
+        fig_f3.add_hline(y=vib_thresh, row=i, col=1,
+            line_color="#dc2626", line_dash="dot",
+            annotation_text=f"Critical {vib_thresh:.0f} mm/s" if i==1 else "",
+            annotation_font_color="#dc2626",
+            annotation_position="top right",
+            secondary_y=False)
+
+        # Y-axes per row
+        fig_f3.update_yaxes(title_text="Vib (mm/s)", gridcolor="#0f1928", zeroline=False,
+                             range=[0, df["vibration_mm_s"].max()*1.15],
+                             row=i, col=1, secondary_y=False)
+        fig_f3.update_yaxes(title_text="Rej (%)", gridcolor="#0f1928", zeroline=False,
+                             range=[0, 110],
+                             tickfont=dict(color="#ef4444"),
+                             title_font=dict(color="#ef4444"),
+                             row=i, col=1, secondary_y=True)
+
+    fig_f3.update_xaxes(gridcolor="#0f1928", zeroline=False)
+    fig_f3.update_layout(
+        **CHART_BASE,
+        height=340 * n_m,
+        hovermode="x unified",
+        legend=dict(bgcolor="rgba(0,0,0,0)", font_size=11, orientation="h", y=1.02, x=0),
+        title=dict(text="All Machines — Vibration (mm/s) & Rejection Rate (%)",
+                   font_color="#8899aa", font_size=13),
+    )
+    st.plotly_chart(fig_f3, use_container_width=True, config={"displayModeBar": False})
 
     fault_hi = df[(df["status"]=="FAULT")&(df["vibration_mm_s"]>vib_thresh)]
     fault_lo = df[(df["status"]=="FAULT")&(df["vibration_mm_s"]<=vib_thresh)]
-    insight(f"<b>{len(fault_hi)}</b> fault(s) coincide with vibration above {vib_thresh:.0f} mm/s. "
-            f"<b>{len(fault_lo)}</b> fault(s) occurred at lower vibration — suggesting electrical overcurrent triggers. "
-            "When a black dot (FAULT) appears, the red dashed line (rejection rate) spikes to 100% — "
-            "confirming that a faulted machine produces zero usable output.")
+    insight(f"All three machines are shown on a shared time axis for direct comparison. "
+            f"<b>{len(fault_hi)}</b> fault(s) coincide with vibration above {vib_thresh:.0f} mm/s; "
+            f"<b>{len(fault_lo)}</b> occurred at lower vibration — triggered by electrical overcurrent. "
+            "When a black dot (FAULT) appears, the red dashed rejection rate spikes to 100%, "
+            "confirming a faulted machine produces zero usable output. "
+            "Comparing rows shows M1 has more frequent and higher-amplitude fault events than M2 and M3.")
     st.info("📌 **Rejection Rate Definition:** "
             "RUNNING → rejected_units / produced_units × 100% (actual defect rate). "
             "FAULT → 100% (machine is down; zero usable output). "
