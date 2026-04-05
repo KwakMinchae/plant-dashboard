@@ -231,13 +231,22 @@ def ask_plantiq(question, context, history):
     try:
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
-            headers={"Content-Type": "application/json"},
-            json={"model": "claude-sonnet-4-20250514", "max_tokens": 350,
+            headers={
+                "Content-Type": "application/json",
+                "anthropic-version": "2023-06-01",
+            },
+            json={"model": "claude-opus-4-5", "max_tokens": 350,
                   "system": system,
                   "messages": history + [{"role": "user", "content": question}]},
             timeout=25,
         )
-        return resp.json()["content"][0]["text"]
+        data = resp.json()
+        if "content" in data:
+            return data["content"][0]["text"]
+        elif "error" in data:
+            return f"⚠️ API error: {data['error'].get('message','unknown')}"
+        else:
+            return f"⚠️ Unexpected response: {str(data)[:200]}"
     except Exception as e:
         return f"⚠️ Could not reach AI: {e}"
 
