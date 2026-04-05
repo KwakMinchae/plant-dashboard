@@ -229,13 +229,15 @@ def ask_plantiq(question, context, history):
         f"PLANT DATA CONTEXT:\n{context}"
     )
     try:
+        api_key = st.secrets.get("ANTHROPIC_API_KEY", os.environ.get("ANTHROPIC_API_KEY",""))
         resp = requests.post(
             "https://api.anthropic.com/v1/messages",
             headers={
                 "Content-Type": "application/json",
                 "anthropic-version": "2023-06-01",
+                "x-api-key": api_key,
             },
-            json={"model": "claude-opus-4-5", "max_tokens": 350,
+            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 350,
                   "system": system,
                   "messages": history + [{"role": "user", "content": question}]},
             timeout=25,
