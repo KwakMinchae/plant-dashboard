@@ -439,6 +439,186 @@ with TAB_MAIN:
                 "<b>MEDIUM</b> = single sensor exceeded — monitor closely. "
                 "<b>LOW</b> = quality threshold only — review process.")
 
+    st.markdown("---")
+
+    # ── 5. OEE ───────────────────────────────────────────────────────────────
+    st.markdown('<div class="sh-primary">📐 Overall Equipment Effectiveness (OEE)</div>', unsafe_allow_html=True)
+
+    with st.expander("ℹ️ How OEE & all metrics are calculated", expanded=False):
+        st.markdown(f"""
+**OEE = Availability × Performance × Quality**
+
+| Metric | Formula |
+|--------|---------|
+| **Availability (A)** | Running hours ÷ (Running + Fault + Idle hours) |
+| **Performance (P)** | Actual output ÷ (Peak hourly rate × Running hours) |
+| **Quality (Q)** | (Produced − Rejected) ÷ Produced |
+| **OEE** | A × P × Q × 100% — World-class target: ≥ 85% |
+| **Plant Uptime** | Running readings ÷ Total readings × 100% |
+| **Yield Rate** | (Produced − Rejected) ÷ Produced × 100% |
+| **Rejection Rate (RUNNING)** | Rejected ÷ Produced × 100% |
+| **Rejection Rate (FAULT)** | 100% — machine is down, zero output |
+| **Risk Score** | Fault rate×0.40 + Vib exceedances×0.30 + Cur exceedances×0.20 + Rejection×0.10, scaled 0–100 |
+| **Severity HIGH** | Both current > {cur_thresh:.0f} A AND vibration > {vib_thresh:.0f} mm/s, or status = FAULT |
+| **Severity MEDIUM** | One of current or vibration exceeds threshold |
+| **Downtime Rate** | Fault hours ÷ Total hours × 100% — target < 2% (SEMI E10) |
+""")
+
+    oee_cols = st.columns(len(sel_machines) + 1)
+    for i, mach in enumerate(sel_machines):
+        msub   = df[df["machine_id"]==mach]
+        n      = len(msub) or 1
+        run_h  = (msub["status"]=="RUNNING").sum()
+        avail  = run_h / n
+        prod_run = msub[msub["status"]=="RUNNING"]["produced_units"]
+        perf   = min(prod_run.sum() / max(prod_run.max() * run_h, 1), 1.0) if not prod_run.empty else 0
+        good   = msub["produced_units"].sum() - msub["rejected_units"].sum()
+        qual   = good / max(msub["produced_units"].sum(), 1)
+        oee    = avail * perf * qual * 100
+        oc     = "#4ade80" if oee>=85 else ("#fbbf24" if oee>=60 else "#f87171")
+        with oee_cols[i]:
+            st.markdown(f'''<div class="kpi-wrap" style="--kpi-accent:{oc};--kpi-color:{oc}">
+                <div class="kpi-label">⚙️ {mach} OEE</div>
+                <div class="kpi-value">{oee:.1f}%</div>
+                <div class="kpi-sub">A:{avail*100:.0f}% · P:{perf*100:.0f}% · Q:{qual*100:.0f}%</div>
+            </div>''', unsafe_allow_html=True)
+
+    pw_avail = (df["status"]=="RUNNING").sum() / total
+    pw_run   = df[df["status"]=="RUNNING"]["produced_units"]
+    pw_perf  = min(pw_run.sum() / max(pw_run.max()*(df["status"]=="RUNNING").sum(),1),1.0) if not pw_run.empty else 0
+    pw_qual  = (total_prod-total_rej)/max(total_prod,1)
+    pw_oee   = pw_avail * pw_perf * pw_qual * 100
+    pw_col   = "#4ade80" if pw_oee>=85 else ("#fbbf24" if pw_oee>=60 else "#f87171")
+    with oee_cols[-1]:
+        st.markdown(f'''<div class="kpi-wrap" style="--kpi-accent:{pw_col};--kpi-color:{pw_col}">
+            <div class="kpi-label">🏭 Plant OEE</div>
+            <div class="kpi-value">{pw_oee:.1f}%</div>
+            <div class="kpi-sub">A:{pw_avail*100:.0f}% · P:{pw_perf*100:.0f}% · Q:{pw_qual*100:.0f}%</div>
+        </div>''', unsafe_allow_html=True)
+
+    insight(f"World-class OEE benchmark is <b>≥ 85%</b> (SEMI E10 standard). Plant OEE = <b>{pw_oee:.1f}%</b> — "
+            f"{'above' if pw_oee>=85 else 'below'} world-class. Fault elimination gives the fastest OEE gains "
+            "by directly improving Availability.")
+    st.markdown("---")
+
+    # ── 6. DOWNTIME COUNTER ───────────────────────────────────────────────────
+    st.markdown('<div class="sh-primary">⏱ Machine Downtime Counter</div>', unsafe_allow_html=True)
+
+    dt_cols = st.columns(len(sel_machines))
+    for i, mach in enumerate(sel_machines):
+        msub   = df[df["machine_id"]==mach].sort_values("timestamp")
+        flt_h  = (msub["status"]=="FAULT").sum()
+        tot_h  = len(msub)
+        dt_pct = flt_h / tot_h * 100 if tot_h else 0
+        streak = max_streak = 0
+        for s in msub["status"]:
+            streak = streak+1 if s=="FAULT" else 0
+            max_streak = max(max_streak, streak)
+        fault_rows_m = msub[msub["status"]=="FAULT"]
+        last_fault   = fault_rows_m["timestamp"].max() if not fault_rows_m.empty else None
+        last_str     = last_fault.strftime("%b %d %H:%M") if last_fault else "None"
+        dt_col = "#f87171" if dt_pct>5 else ("#fbbf24" if dt_pct>2 else "#4ade80")
+        css = "mc-fault" if flt_h>5 else ("mc-idle" if flt_h>2 else "mc-running")
+        with dt_cols[i]:
+            st.markdown(f'''<div class="mc {css}">
+              <div class="mc-head"><span class="mc-id">{mach}</span>
+                <span style="font-size:1.3rem;font-weight:800;color:{dt_col}">{flt_h} hrs</span></div>
+              <div class="mc-grid">
+                <div class="mc-m"><div class="mc-m-label">DOWNTIME RATE</div>
+                  <div class="mc-m-val" style="color:{dt_col}">{dt_pct:.1f}%</div></div>
+                <div class="mc-m"><div class="mc-m-label">LONGEST STREAK</div>
+                  <div class="mc-m-val">{max_streak} hr(s)</div></div>
+                <div class="mc-m"><div class="mc-m-label">TOTAL HOURS</div>
+                  <div class="mc-m-val">{tot_h}</div></div>
+                <div class="mc-m"><div class="mc-m-label">LAST FAULT</div>
+                  <div class="mc-m-val" style="font-size:.85rem">{last_str}</div></div>
+              </div>
+              <div class="mc-vib-bar-bg">
+                <div class="mc-vib-bar" style="--vb-col:{dt_col};--vb-w:{min(dt_pct*5,100):.0f}%"></div>
+              </div>
+              <div class="mc-vib-label">Downtime: {dt_pct:.1f}% · Target: &lt;2% (SEMI E10)</div>
+            </div>''', unsafe_allow_html=True)
+
+    worst_dt = max(sel_machines, key=lambda m:(df[df["machine_id"]==m]["status"]=="FAULT").sum()) if sel_machines else "N/A"
+    insight(f"<b>{worst_dt}</b> has the highest downtime. Industry target for semiconductor manufacturing "
+            "is <b>&lt;2% downtime rate</b>. Longest fault streak reveals sustained failures needing root-cause "
+            "investigation — not just reactive resets. Formula: Fault hours ÷ Total hours × 100%.")
+    st.markdown("---")
+
+    # ── 7. SHIFT HANDOVER SUMMARY ─────────────────────────────────────────────
+    st.markdown('<div class="sh-primary">📋 Shift Handover Summary</div>', unsafe_allow_html=True)
+
+    shift_summary = df.groupby("shift").agg(
+        produced =("produced_units","sum"),
+        rejected =("rejected_units","sum"),
+        fault_hrs=("status", lambda x:(x=="FAULT").sum()),
+        run_hrs  =("status", lambda x:(x=="RUNNING").sum()),
+        total_hrs=("status","count"),
+    ).reset_index()
+    shift_summary["yield_pct"]  = ((shift_summary["produced"]-shift_summary["rejected"])/
+                                    shift_summary["produced"].replace(0,1)*100).round(1)
+    shift_summary["uptime_pct"] = (shift_summary["run_hrs"]/shift_summary["total_hrs"]*100).round(1)
+    mach_shift = df.groupby(["machine_id","shift"]).agg(
+        faults=("status", lambda x:(x=="FAULT").sum()),
+    ).reset_index()
+
+    sh1, sh2 = st.columns(2)
+    for ci, (shift, col_sh) in enumerate([("Day",sh1),("Night",sh2)]):
+        sv = shift_summary[shift_summary["shift"]==shift]
+        if sv.empty: continue
+        sv = sv.iloc[0]
+        ms = mach_shift[mach_shift["shift"]==shift]
+        sh_df   = df[df["shift"]==shift]
+        sh_avail = sv["run_hrs"]/max(sv["total_hrs"],1)
+        sh_run   = sh_df[sh_df["status"]=="RUNNING"]["produced_units"]
+        sh_perf  = min(sh_run.sum()/max(sh_run.max()*sv["run_hrs"],1),1.0) if not sh_run.empty else 0
+        sh_qual  = (sv["produced"]-sv["rejected"])/max(sv["produced"],1)
+        sh_oee   = sh_avail*sh_perf*sh_qual*100
+        sc = "#f59e0b" if shift=="Day" else "#3b82f6"
+        icon = "☀️" if shift=="Day" else "🌙"
+        oee_c = "#4ade80" if sh_oee>=85 else ("#fbbf24" if sh_oee>=60 else "#f87171")
+        machine_boxes = "".join([
+            f'<div style="flex:1;background:{T["mc_m_bg"]};border-radius:8px;padding:8px;text-align:center">'
+            f'<div style="font-size:10px;color:{T["text_dim"]};font-family:IBM Plex Mono,monospace">{row["machine_id"]}</div>'
+            f'<div style="font-size:1rem;font-weight:700;color:{"#f87171" if row["faults"]>2 else "#fbbf24" if row["faults"]>0 else "#4ade80"}">{int(row["faults"])} flt</div></div>'
+            for _, row in ms.iterrows()
+        ])
+        col_sh.markdown(f'''
+        <div style="background:{T["kpi_bg"]};border:1px solid {T["kpi_border"]};
+                    border-top:3px solid {sc};border-radius:14px;padding:20px;">
+          <div style="font-family:Syne,sans-serif;font-size:1.1rem;font-weight:700;
+                      color:{T["text"]};margin-bottom:14px">{icon} {shift} Shift</div>
+          <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <tr><td style="color:{T["text_dim"]};padding:5px 0;font-family:IBM Plex Mono,monospace;font-size:11px">UNITS PRODUCED</td>
+                <td style="color:{T["text"]};font-weight:700;text-align:right">{int(sv["produced"]):,}</td></tr>
+            <tr><td style="color:{T["text_dim"]};padding:5px 0;font-family:IBM Plex Mono,monospace;font-size:11px">UNITS REJECTED</td>
+                <td style="color:#f87171;font-weight:700;text-align:right">{int(sv["rejected"]):,}</td></tr>
+            <tr><td style="color:{T["text_dim"]};padding:5px 0;font-family:IBM Plex Mono,monospace;font-size:11px">YIELD RATE</td>
+                <td style="color:#4ade80;font-weight:700;text-align:right">{sv["yield_pct"]:.1f}%</td></tr>
+            <tr><td style="color:{T["text_dim"]};padding:5px 0;font-family:IBM Plex Mono,monospace;font-size:11px">UPTIME</td>
+                <td style="color:{T["text"]};font-weight:700;text-align:right">{sv["uptime_pct"]:.1f}%</td></tr>
+            <tr><td style="color:{T["text_dim"]};padding:5px 0;font-family:IBM Plex Mono,monospace;font-size:11px">FAULT HOURS</td>
+                <td style="color:#f87171;font-weight:700;text-align:right">{int(sv["fault_hrs"])}</td></tr>
+            <tr><td style="color:{T["text_dim"]};padding:5px 0;font-family:IBM Plex Mono,monospace;font-size:11px">SHIFT OEE</td>
+                <td style="color:{oee_c};font-weight:700;text-align:right">{sh_oee:.1f}%</td></tr>
+          </table>
+          <div style="margin-top:12px;font-family:IBM Plex Mono,monospace;font-size:10px;
+                      color:{T["text_dim"]};border-top:1px solid {T["kpi_border"]};padding-top:8px">FAULTS BY MACHINE</div>
+          <div style="display:flex;gap:8px;margin-top:8px">{machine_boxes}</div>
+        </div>''', unsafe_allow_html=True)
+
+    day_row   = shift_summary[shift_summary["shift"]=="Day"]
+    night_row = shift_summary[shift_summary["shift"]=="Night"]
+    if not day_row.empty and not night_row.empty:
+        dp = int(day_row.iloc[0]["produced"]); np_ = int(night_row.iloc[0]["produced"])
+        gap = (dp-np_)/max(np_,1)*100
+        better = "Day" if dp>np_ else "Night"
+        insight(f"<b>{better} shift</b> outperforms by {abs(gap):.1f}% on units produced "
+                f"(Day: {dp:,} · Night: {np_:,}). With near-equal fault rates, the gap reflects "
+                "supervision intensity and scheduling. Incoming shift operators should review the "
+                "fault breakdown above before taking over.")
+    st.markdown("---")
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — ADVANCED ANALYSIS
