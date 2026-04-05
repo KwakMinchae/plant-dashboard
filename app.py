@@ -167,6 +167,101 @@ else:
     if up: df_raw = load_data(up)
     else:  st.info("Place your `.xlsm` file next to `app.py`, or upload it above."); st.stop()
 
+# CHATBOT — AI assistant function
+# ─────────────────────────────────────────────────────────────────────────────
+def build_chat_context(machine_filter, df_all):
+    """Build data context string for the selected machine scope."""
+    if machine_filter == "All Machines":
+        sub = df_all.copy()
+        scope = "all machines (M1, M2, M3)"
+    else:
+        sub = df_all[df_all["machine_id"] == machine_filter].copy()
+        scope = machine_filter
+
+    if sub.empty:
+        return f"No data available for {scope}."
+
+    fault_c  = (sub["status"] == "FAULT").sum()
+    run_pct  = (sub["status"] == "RUNNING").sum() / len(sub) * 100
+    prod     = sub["produced_units"].sum()
+    rej      = sub["rejected_units"].sum()
+    rej_r    = rej / prod * 100 if prod > 0 else 0
+    avg_vib  = sub["vibration_mm_s"].mean()
+    avg_cur  = sub["current_a"].mean()
+    max_vib  = sub["vibration_mm_s"].max()
+    max_cur  = sub["current_a"].max()
+    date_rng = f"{sub['date'].min()} to {sub['date'].max()}"
+
+    lines = [
+        f"Dataset scope: {scope}, period: {date_rng}.",
+        f"Total readings: {len(sub)}. Running: {run_pct:.1f}%. Fault readings: {fault_c} ({fault_c/len(sub)*100:.1f}%).",
+        f"Production: {prod} units produced, {rej} rejected, rejection rate: {rej_r:.2f}%.",
+        f"Average vibration: {avg_vib:.2f} mm/s (max: {max_vib:.2f} mm/s). Critical threshold: 10 mm/s.",
+        f"Average current: {avg_cur:.2f} A (max: {max_cur:.2f} A). Critical threshold: 60 A.",
+    ]
+
+    if machine_filter == "All Machines":
+        for m in ["M1","M2","M3"]:
+            ms = sub[sub["machine_id"]==m]
+            if ms.empty: continue
+            mf = (ms["status"]=="FAULT").sum()
+            mr = ms["rejected_units"].sum() / max(ms["produced_units"].sum(),1) * 100
+            lines.append(f"{m}: {mf} faults, avg vib {ms['vibration_mm_s'].mean():.2f} mm/s, "
+                         f"avg cur {ms['current_a'].mean():.2f} A, rejection {mr:.2f}%.")
+    
+    # shift breakdown
+    for sh, sg in sub.groupby("shift"):
+        sy = (sg["produced_units"].sum()-sg["rejected_units"].sum())/max(sg["produced_units"].sum(),1)*100
+        lines.append(f"{sh} shift: {sg['produced_units'].sum()} produced, yield {sy:.1f}%, "
+                     f"faults: {(sg['status']=='FAULT').sum()}.")
+
+    return " ".join(lines)
+
+
+def ask_plantiq(question, context, history):
+    system = (
+        "You are PlantIQ, an AI assistant for a manufacturing plant monitoring dashboard. "
+        "You ONLY answer questions based on the sensor data provided in the context below. "
+        "If a question cannot be answered from the data, say clearly: "
+        "'I don\'t have enough information in the dataset to answer that.' "
+        "Answer in plain English for a non-expert operator. Be concise (2-4 sentences). "
+        "Use specific numbers from the context. Never make up data or speculate beyond what is given.\n\n"
+        f"PLANT DATA CONTEXT:\n{context}"
+    )
+    try:
+        resp = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={"Content-Type": "application/json"},
+            json={"model": "claude-sonnet-4-20250514", "max_tokens": 350,
+                  "system": system,
+                  "messages": history + [{"role": "user", "content": question}]},
+            timeout=25,
+        )
+        return resp.json()["content"][0]["text"]
+    except Exception as e:
+        return f"⚠️ Could not reach AI: {e}"
+
+
+def get_suggestions(machine_filter):
+    """Return suggested questions based on selected machine."""
+    if machine_filter == "All Machines":
+        return [
+            "Which machine has the most faults?",
+            "What is the overall plant uptime?",
+            "Which shift performs better?",
+            "What is the total production rejection rate?",
+            "Which machine is most at risk?",
+        ]
+    else:
+        return [
+            f"How many faults did {machine_filter} have?",
+            f"What is {machine_filter}\'s average vibration?",
+            f"When did {machine_filter} last enter a FAULT state?",
+            f"What is {machine_filter}\'s rejection rate?",
+            f"Is {machine_filter}\'s current draw normal?",
+        ]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SIDEBAR — Fix #10: sensor guide always open by default
 # ─────────────────────────────────────────────────────────────────────────────
@@ -328,100 +423,6 @@ def insight(text):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CHATBOT — AI assistant function
-# ─────────────────────────────────────────────────────────────────────────────
-def build_chat_context(machine_filter, df_all):
-    """Build data context string for the selected machine scope."""
-    if machine_filter == "All Machines":
-        sub = df_all.copy()
-        scope = "all machines (M1, M2, M3)"
-    else:
-        sub = df_all[df_all["machine_id"] == machine_filter].copy()
-        scope = machine_filter
-
-    if sub.empty:
-        return f"No data available for {scope}."
-
-    fault_c  = (sub["status"] == "FAULT").sum()
-    run_pct  = (sub["status"] == "RUNNING").sum() / len(sub) * 100
-    prod     = sub["produced_units"].sum()
-    rej      = sub["rejected_units"].sum()
-    rej_r    = rej / prod * 100 if prod > 0 else 0
-    avg_vib  = sub["vibration_mm_s"].mean()
-    avg_cur  = sub["current_a"].mean()
-    max_vib  = sub["vibration_mm_s"].max()
-    max_cur  = sub["current_a"].max()
-    date_rng = f"{sub['date'].min()} to {sub['date'].max()}"
-
-    lines = [
-        f"Dataset scope: {scope}, period: {date_rng}.",
-        f"Total readings: {len(sub)}. Running: {run_pct:.1f}%. Fault readings: {fault_c} ({fault_c/len(sub)*100:.1f}%).",
-        f"Production: {prod} units produced, {rej} rejected, rejection rate: {rej_r:.2f}%.",
-        f"Average vibration: {avg_vib:.2f} mm/s (max: {max_vib:.2f} mm/s). Critical threshold: 10 mm/s.",
-        f"Average current: {avg_cur:.2f} A (max: {max_cur:.2f} A). Critical threshold: 60 A.",
-    ]
-
-    if machine_filter == "All Machines":
-        for m in ["M1","M2","M3"]:
-            ms = sub[sub["machine_id"]==m]
-            if ms.empty: continue
-            mf = (ms["status"]=="FAULT").sum()
-            mr = ms["rejected_units"].sum() / max(ms["produced_units"].sum(),1) * 100
-            lines.append(f"{m}: {mf} faults, avg vib {ms['vibration_mm_s'].mean():.2f} mm/s, "
-                         f"avg cur {ms['current_a'].mean():.2f} A, rejection {mr:.2f}%.")
-    
-    # shift breakdown
-    for sh, sg in sub.groupby("shift"):
-        sy = (sg["produced_units"].sum()-sg["rejected_units"].sum())/max(sg["produced_units"].sum(),1)*100
-        lines.append(f"{sh} shift: {sg['produced_units'].sum()} produced, yield {sy:.1f}%, "
-                     f"faults: {(sg['status']=='FAULT').sum()}.")
-
-    return " ".join(lines)
-
-
-def ask_plantiq(question, context, history):
-    system = (
-        "You are PlantIQ, an AI assistant for a manufacturing plant monitoring dashboard. "
-        "You ONLY answer questions based on the sensor data provided in the context below. "
-        "If a question cannot be answered from the data, say clearly: "
-        "'I don\'t have enough information in the dataset to answer that.' "
-        "Answer in plain English for a non-expert operator. Be concise (2-4 sentences). "
-        "Use specific numbers from the context. Never make up data or speculate beyond what is given.\n\n"
-        f"PLANT DATA CONTEXT:\n{context}"
-    )
-    try:
-        resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={"Content-Type": "application/json"},
-            json={"model": "claude-sonnet-4-20250514", "max_tokens": 350,
-                  "system": system,
-                  "messages": history + [{"role": "user", "content": question}]},
-            timeout=25,
-        )
-        return resp.json()["content"][0]["text"]
-    except Exception as e:
-        return f"⚠️ Could not reach AI: {e}"
-
-
-def get_suggestions(machine_filter):
-    """Return suggested questions based on selected machine."""
-    if machine_filter == "All Machines":
-        return [
-            "Which machine has the most faults?",
-            "What is the overall plant uptime?",
-            "Which shift performs better?",
-            "What is the total production rejection rate?",
-            "Which machine is most at risk?",
-        ]
-    else:
-        return [
-            f"How many faults did {machine_filter} have?",
-            f"What is {machine_filter}\'s average vibration?",
-            f"When did {machine_filter} last enter a FAULT state?",
-            f"What is {machine_filter}\'s rejection rate?",
-            f"Is {machine_filter}\'s current draw normal?",
-        ]
-
 # ─────────────────────────────────────────────────────────────────────────────
 # HEADER
 # ─────────────────────────────────────────────────────────────────────────────
