@@ -284,11 +284,11 @@ st.markdown("---")
 TAB_MAIN, TAB_ADV = st.tabs(["📊  Live Dashboard", "🔬  Advanced Analysis"])
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 1 — LIVE DASHBOARD
+# TAB 1 — LIVE DASHBOARD  (clean: Alert → KPIs → Machine Cards → Alerts Log)
 # ══════════════════════════════════════════════════════════════════════════════
 with TAB_MAIN:
 
-    # Fix #7: ALERTS at the top — most actionable info first
+    # ── 1. ALERT BANNER ──────────────────────────────────────────────────────
     if not alerts_df.empty:
         top_machine = alerts_df["machine_id"].value_counts().idxmax()
         st.markdown(f"""<div class="alert-banner">
@@ -301,10 +301,9 @@ with TAB_MAIN:
         </div>""", unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── KPI CARDS ────────────────────────────────────────────────────────────
-    # Fix #3: "Plant Overview" as primary header
+    # ── 2. KPI CARDS ─────────────────────────────────────────────────────────
     st.markdown('<div class="sh-primary">Plant Overview</div>', unsafe_allow_html=True)
-    k1, k2, k3, k4 = st.columns(4)
+    k1, k2, k3 = st.columns(3)
 
     def kpi(col, label, value, sub, accent, color):
         col.markdown(f"""<div class="kpi-wrap" style="--kpi-accent:{accent};--kpi-color:{color}">
@@ -312,11 +311,9 @@ with TAB_MAIN:
             <div class="kpi-value">{value}</div>
             <div class="kpi-sub">{sub}</div></div>""", unsafe_allow_html=True)
 
-    up_col   = "#4ade80" if uptime_pct>=80 else ("#fbbf24" if uptime_pct>=60 else "#f87171")
-    yr_col   = "#4ade80" if yield_rate>=90 else ("#fbbf24" if yield_rate>=75 else "#f87171")
-    ft_col   = "#f87171" if fault_count>0 else "#4ade80"
-    top_risk = max(machine_risk.values()) if machine_risk else 0
-    rk_col   = "#4ade80" if top_risk<30 else ("#fbbf24" if top_risk<60 else "#f87171")
+    up_col = "#4ade80" if uptime_pct>=80 else ("#fbbf24" if uptime_pct>=60 else "#f87171")
+    yr_col = "#4ade80" if yield_rate>=90 else ("#fbbf24" if yield_rate>=75 else "#f87171")
+    ft_col = "#f87171" if fault_count>0 else "#4ade80"
 
     kpi(k1,"⏱ Plant Uptime",   f"{uptime_pct:.1f}%",
         f"{(df['status']=='RUNNING').sum():,} / {total:,} readings","#2563eb",up_col)
@@ -324,12 +321,10 @@ with TAB_MAIN:
         f"{total_prod-total_rej:,} good of {total_prod:,} units","#16a34a",yr_col)
     kpi(k3,"🚨 Fault Readings", str(fault_count),
         f"{fault_count/total*100:.1f}% of all readings — machine down","#dc2626",ft_col)
-    kpi(k4,"⚠️ Max Risk Score", f"{top_risk}/100",
-        "Highest machine risk index","#ca8a04",rk_col)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── MACHINE STATUS CARDS — Fix #2: removed gauges, added vibration bar ───
+    # ── 3. MACHINE STATUS CARDS ───────────────────────────────────────────────
     st.markdown('<div class="sh-primary">Individual Machine Status</div>', unsafe_allow_html=True)
 
     STATUS_CSS  = {"RUNNING":"mc-running","IDLE":"mc-idle","FAULT":"mc-fault"}
@@ -341,14 +336,12 @@ with TAB_MAIN:
         row = latest[latest["machine_id"]==mach]
         if row.empty: continue
         r = row.iloc[0]; st_ = r["status"]; rs = machine_risk[mach]
-        rsk_cls = "risk-low" if rs<30 else ("risk-med" if rs<60 else "risk-high")
-        rsk_lbl = "LOW" if rs<30 else ("MEDIUM" if rs<60 else "HIGH")
-        cc = "#f87171" if r["current_a"]>cur_thresh else "#c8d8e8"
-        vc = "#f87171" if r["vibration_mm_s"]>vib_thresh else "#c8d8e8"
-        # vibration progress bar — width as % of 20mm/s max
-        vib_pct   = min(r["vibration_mm_s"]/20*100, 100)
-        vib_col   = "#4ade80" if r["vibration_mm_s"]<=8 else ("#fbbf24" if r["vibration_mm_s"]<=vib_thresh else "#f87171")
-        risk_col  = "#4ade80" if rs<30 else ("#fbbf24" if rs<60 else "#f87171")
+        rsk_cls  = "risk-low" if rs<30 else ("risk-med" if rs<60 else "risk-high")
+        rsk_lbl  = "LOW" if rs<30 else ("MEDIUM" if rs<60 else "HIGH")
+        cc       = "#f87171" if r["current_a"]>cur_thresh else "#c8d8e8"
+        vc       = "#f87171" if r["vibration_mm_s"]>vib_thresh else "#c8d8e8"
+        vib_pct  = min(r["vibration_mm_s"]/20*100, 100)
+        vib_col  = "#4ade80" if r["vibration_mm_s"]<=8 else ("#fbbf24" if r["vibration_mm_s"]<=vib_thresh else "#f87171")
         with mcols[i]:
             st.markdown(f"""<div class="mc {STATUS_CSS.get(st_,'mc-idle')}">
               <div class="mc-head">
@@ -377,7 +370,7 @@ with TAB_MAIN:
                 <div class="mc-vib-bar" style="--vb-col:{vib_col};--vb-w:{vib_pct:.0f}%"></div>
               </div>
               <div class="mc-vib-label">
-                Vibration level: {r['vibration_mm_s']:.2f} / 20 mm/s &nbsp;·&nbsp;
+                Vibration: {r['vibration_mm_s']:.2f} / 20 mm/s &nbsp;·&nbsp;
                 Risk: <span class="{rsk_cls}"><b>{rs}/100 — {rsk_lbl}</b></span>
               </div>
             </div>""", unsafe_allow_html=True)
@@ -385,197 +378,8 @@ with TAB_MAIN:
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("---")
 
-    # ── SENSOR TRENDS ────────────────────────────────────────────────────────
-    st.markdown('<div class="sh-primary">Sensor Trends Over Time</div>', unsafe_allow_html=True)
-
-    fig_trend = make_subplots(rows=2,cols=1,shared_xaxes=True,vertical_spacing=.09,
-        subplot_titles=("Motor Current (A)","Vibration Velocity (mm/s)"),row_heights=[.5,.5])
-    for mach in sel_machines:
-        sub = df[df["machine_id"]==mach].sort_values("timestamp").copy()
-        c   = MACH_COLORS.get(mach,"#aaa")
-        sub["cur_roll"] = sub["current_a"].rolling(8,min_periods=1).mean()
-        sub["vib_roll"] = sub["vibration_mm_s"].rolling(8,min_periods=1).mean()
-        fig_trend.add_trace(go.Scatter(x=sub["timestamp"],y=sub["current_a"],name=mach,
-            line=dict(color=c,width=1),opacity=.35,showlegend=True),row=1,col=1)
-        fig_trend.add_trace(go.Scatter(x=sub["timestamp"],y=sub["cur_roll"],
-            name=f"{mach} avg",line=dict(color=c,width=2.5),showlegend=False),row=1,col=1)
-        fig_trend.add_trace(go.Scatter(x=sub["timestamp"],y=sub["vibration_mm_s"],name=mach,
-            line=dict(color=c,width=1,dash="dot"),opacity=.35,showlegend=False),row=2,col=1)
-        fig_trend.add_trace(go.Scatter(x=sub["timestamp"],y=sub["vib_roll"],
-            name=f"{mach} avg",line=dict(color=c,width=2.5),showlegend=False),row=2,col=1)
-    fig_trend.add_hline(y=cur_thresh,row=1,col=1,line_color="#dc2626",line_dash="dash",
-        annotation_text=f"Critical {cur_thresh:.0f}A",annotation_font_color="#dc2626")
-    fig_trend.add_hline(y=vib_thresh,row=2,col=1,line_color="#dc2626",line_dash="dash",
-        annotation_text=f"Critical {vib_thresh:.0f}mm/s",annotation_font_color="#dc2626")
-    fig_trend.update_layout(**CHART_BASE,height=460,hovermode="x unified",
-        legend=dict(bgcolor="rgba(0,0,0,0)",font_size=11))
-    apply_grid(fig_trend,[1,2])
-    st.plotly_chart(fig_trend, use_container_width=True)
-    insight("Thick lines show the 8-reading rolling average — useful for spotting sustained trends through noisy raw data. "
-            "Red dashed lines mark alert thresholds. Spikes above these lines should be investigated immediately.")
-    st.markdown("---")
-
-    # ── PRODUCTION ROW — Fix #4: split into 2 rows of 2 instead of 4 cramped cols
-    st.markdown('<div class="sh-primary">Production & Machine Analysis</div>', unsafe_allow_html=True)
-
-    row1_c1, row1_c2 = st.columns(2)
-
-    with row1_c1:
-        st.markdown('<div class="sh-secondary">Production by Shift</div>', unsafe_allow_html=True)
-        sdf = df.groupby(["shift","machine_id"])[["produced_units","rejected_units"]].sum().reset_index()
-        fb  = go.Figure()
-        for mach in sel_machines:
-            sub = sdf[sdf["machine_id"]==mach]; col = MACH_COLORS.get(mach,"#aaa")
-            fb.add_trace(go.Bar(name=f"{mach} Good",x=sub["shift"],
-                y=sub["produced_units"]-sub["rejected_units"],marker_color=col,opacity=.9))
-            fb.add_trace(go.Bar(name=f"{mach} Rejected",x=sub["shift"],
-                y=sub["rejected_units"],marker_color=col,opacity=.35,marker_pattern_shape="/"))
-        fb.update_layout(**CHART_BASE,height=320,barmode="group",
-            xaxis_title="Shift", yaxis_title="Units",
-            legend=dict(bgcolor="rgba(0,0,0,0)",font_size=10))
-        apply_grid(fb)
-        st.plotly_chart(fb, use_container_width=True)
-        insight("Solid bars = good units produced. Hatched bars = rejected units. "
-                "Compare Day vs Night shift to identify quality differences.")
-
-    with row1_c2:
-        st.markdown('<div class="sh-secondary">Operational Status Distribution (hrs)</div>', unsafe_allow_html=True)
-        status_hrs = df.groupby(["machine_id","status"]).size().reset_index(name="hours")
-        status_colors_bar = {"FAULT":"#ef4444","IDLE":"#9ca3af","RUNNING":"#3b82f6"}
-        fos = go.Figure()
-        for st_opt in ["FAULT","IDLE","RUNNING"]:
-            sub = status_hrs[status_hrs["status"]==st_opt]
-            fos.add_trace(go.Bar(name=st_opt, x=sub["machine_id"], y=sub["hours"],
-                marker_color=status_colors_bar[st_opt],
-                text=sub["hours"], textposition="outside",
-                textfont=dict(size=11)))
-        fos.update_layout(**CHART_BASE, height=320, barmode="group",
-            xaxis_title="Machine", yaxis_title="Hours",
-            legend=dict(bgcolor="rgba(0,0,0,0)", font_size=11))
-        apply_grid(fos)
-        st.plotly_chart(fos, use_container_width=True)
-        m1_f = status_hrs[(status_hrs["machine_id"]=="M1")&(status_hrs["status"]=="FAULT")]["hours"].sum()
-        insight(f"<b>M1 has the highest fault hours ({m1_f} hrs)</b> — significantly more than M2 and M3. "
-                "This directly reduces M1's productive running time and should be the priority for maintenance.")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    row2_c1, row2_c2 = st.columns(2)
-
-    with row2_c1:
-        st.markdown('<div class="sh-secondary">Sensor Correlation Heatmap</div>', unsafe_allow_html=True)
-        corr = df[["current_a","vibration_mm_s","rejection_rate","produced_units"]].corr().round(2)
-        fh = go.Figure(go.Heatmap(z=corr.values,
-            x=["Current","Vibration","Rejection%","Produced"],
-            y=["Current","Vibration","Rejection%","Produced"],
-            colorscale=[[0,"#dc2626"],[.5,"#0f1928"],[1,"#2563eb"]],zmid=0,
-            text=corr.values,texttemplate="%{text}",
-            textfont={"size":13,"family":"IBM Plex Mono"}))
-        fh.update_layout(**CHART_BASE,height=320)
-        st.plotly_chart(fh, use_container_width=True)
-        insight("Blue = positive correlation, red = negative. Current and Vibration (+0.30) tend to rise together "
-                "before fault events — monitoring both simultaneously is more reliable than either alone.")
-
-    with row2_c2:
-        st.markdown('<div class="sh-secondary">Predictive Risk Score per Machine</div>', unsafe_allow_html=True)
-        rdf = pd.DataFrame({"Machine":list(machine_risk.keys()),
-                             "Score":list(machine_risk.values())})
-        rdf["Color"] = rdf["Score"].apply(
-            lambda x:"#4ade80" if x<30 else("#fbbf24" if x<60 else"#f87171"))
-        fr = go.Figure(go.Bar(x=rdf["Machine"],y=rdf["Score"],marker_color=rdf["Color"],
-            text=rdf["Score"],texttemplate="%{text}/100",textposition="outside",
-            textfont={"family":"IBM Plex Mono","size":13}))
-        fr.update_layout(**CHART_BASE,height=320,yaxis_range=[0,120],
-            xaxis_title="Machine", yaxis_title="Risk Score")
-        apply_grid(fr)
-        st.plotly_chart(fr, use_container_width=True)
-        insight("Composite risk score: Fault rate (40%) + Vibration exceedances (30%) + "
-                "Current exceedances (20%) + Rejection rate (10%). "
-                "<b style='color:#f87171'>Red = high risk</b>, "
-                "<b style='color:#fbbf24'>amber = moderate</b>, "
-                "<b style='color:#4ade80'>green = low</b>.")
-
-    st.markdown("---")
-
-    # ── SHIFT COMPARISON SUMMARY (5.2.4) ─────────────────────────────────────
-    st.markdown('<div class="sh-primary">Shift Comparison Summary</div>', unsafe_allow_html=True)
-
-    shift_summary = df.groupby("shift").agg(
-        total_units=("produced_units","sum"),
-        rejected   =("rejected_units","sum"),
-        fault_hrs  =("status", lambda x:(x=="FAULT").sum()),
-        uptime_pct =("status", lambda x:(x=="RUNNING").sum()/len(x)*100),
-    ).reset_index()
-    shift_summary["yield_pct"] = (
-        (shift_summary["total_units"]-shift_summary["rejected"]) /
-        shift_summary["total_units"].replace(0,1)*100).round(1)
-    shift_summary["rej_rate"] = (
-        shift_summary["rejected"]/shift_summary["total_units"].replace(0,1)*100).round(2)
-
-    vals_day   = shift_summary[shift_summary["shift"]=="Day"].iloc[0] if "Day" in shift_summary["shift"].values else None
-    vals_night = shift_summary[shift_summary["shift"]=="Night"].iloc[0] if "Night" in shift_summary["shift"].values else None
-
-    if vals_day is not None and vals_night is not None:
-        sc1,sc2,sc3,sc4,sc5 = st.columns(5)
-        def scard(col, label, day_v, night_v, fmt, lower_is_better=False):
-            delta_pct = ((day_v - night_v) / max(abs(night_v),0.001)) * 100
-            better = (delta_pct > 0 and not lower_is_better) or (delta_pct < 0 and lower_is_better)
-            arrow = "▲" if delta_pct > 0 else "▼"
-            color = "#4ade80" if better else "#f87171"
-            col.markdown(f"""<div style="background:{T["kpi_bg"]};border:1px solid {T["kpi_border"]};
-                border-radius:12px;padding:14px 10px;text-align:center">
-                <div style="font-size:10px;color:{T["text_dim"]};font-family:IBM Plex Mono,monospace;
-                    letter-spacing:.1em;margin-bottom:6px">{label}</div>
-                <div style="font-size:13px;font-weight:700;color:{T["text"]}">☀️ {fmt.format(day_v)}</div>
-                <div style="font-size:13px;font-weight:700;color:{T["text"]};margin-top:2px">🌙 {fmt.format(night_v)}</div>
-                <div style="font-size:11px;color:{color};margin-top:4px">{arrow} Day {abs(delta_pct):.1f}% {"better" if better else "worse"}</div>
-            </div>""", unsafe_allow_html=True)
-        scard(sc1,"📦 UNITS PRODUCED",   int(vals_day["total_units"]), int(vals_night["total_units"]), "{:,}")
-        scard(sc2,"✅ YIELD RATE",        float(vals_day["yield_pct"]),  float(vals_night["yield_pct"]),  "{:.1f}%")
-        scard(sc3,"❌ REJECTION RATE",    float(vals_day["rej_rate"]),   float(vals_night["rej_rate"]),   "{:.2f}%", lower_is_better=True)
-        scard(sc4,"🚨 FAULT HOURS",       int(vals_day["fault_hrs"]),   int(vals_night["fault_hrs"]),    "{}", lower_is_better=True)
-        scard(sc5,"⏱ UPTIME",            float(vals_day["uptime_pct"]), float(vals_night["uptime_pct"]), "{:.1f}%")
-        insight("Day shift outperforms Night on units produced (+7.6%) despite near-equal fault rates — "
-                "likely driven by supervision intensity and scheduling rather than machine condition. "
-                "Green = Day better · Red = Night better.")
-    st.markdown("---")
-
-    # ── PRODUCTION QUALITY TRACKER (5.2.3) ───────────────────────────────────
-    st.markdown('<div class="sh-primary">Production Quality Tracker</div>', unsafe_allow_html=True)
-
-    rej_thresh_pct = st.slider("Rejection rate alert threshold (%)", 1.0, 20.0, 5.0, 0.5,
-                               key="rej_thresh_slider")
-
-    fig_qual = go.Figure()
-    for mach in sel_machines:
-        sub = df[(df["machine_id"]==mach) & (df["status"]=="RUNNING")].sort_values("timestamp")
-        if sub.empty: continue
-        c = MACH_COLORS.get(mach,"#aaa")
-        rej_run = sub["rejected_units"] / sub["produced_units"].replace(0,1) * 100
-        # bar chart — colour spikes red if above threshold
-        colors_bar = ["#dc2626" if v > rej_thresh_pct else c for v in rej_run]
-        fig_qual.add_trace(go.Bar(
-            x=sub["timestamp"], y=rej_run,
-            name=mach, marker_color=colors_bar, opacity=0.8,
-            hovertemplate=f"<b>{mach}</b> %{{x|%b %d %H:%M}}<br>Rejection: %{{y:.1f}}%<extra></extra>"))
-
-    fig_qual.add_hline(y=rej_thresh_pct, line_color="#dc2626", line_dash="dash",
-        annotation_text=f"Alert threshold: {rej_thresh_pct:.1f}%",
-        annotation_font_color="#dc2626", annotation_position="top right")
-    fig_qual.update_layout(**CHART_BASE, height=320, barmode="overlay",
-        xaxis_title="Timestamp", yaxis_title="Rejection Rate (%)",
-        title=dict(text="Rolling Rejection Rate per Hour (RUNNING state only)",
-                   font_color="#8899aa", font_size=13),
-        legend=dict(bgcolor="rgba(0,0,0,0)", font_size=11))
-    apply_grid(fig_qual)
-    st.plotly_chart(fig_qual, use_container_width=True)
-    insight(f"Bars show per-hour rejection rate during RUNNING state only. "
-            f"<b style='color:#dc2626'>Red bars = rejection rate exceeded {rej_thresh_pct:.1f}% threshold.</b> "
-            "Adjust the threshold slider above to match your quality targets. "
-            "Fault-state hours (rejection = 100%) are excluded to show genuine quality variation during operation.")
-    st.markdown("---")
-
-    # ── FAULT ALERT PANEL with Severity (5.2.2) ──────────────────────────────
-    st.markdown('<div class="sh-primary">Fault Alert Panel</div>', unsafe_allow_html=True)
+    # ── 4. FAULT ALERT LOG ────────────────────────────────────────────────────
+    st.markdown('<div class="sh-primary">Fault Alert Log</div>', unsafe_allow_html=True)
 
     def get_severity(row):
         both = row["current_a"] > cur_thresh and row["vibration_mm_s"] > vib_thresh
@@ -587,38 +391,38 @@ with TAB_MAIN:
         st.success("✅ No anomalies detected in the current selection.")
     else:
         disp = alerts_df.copy()
-        disp["Severity"]   = disp.apply(get_severity, axis=1)
+        disp["Severity"] = disp.apply(get_severity, axis=1)
         high_c   = (disp["Severity"]=="🔴 HIGH").sum()
         medium_c = (disp["Severity"]=="🟠 MEDIUM").sum()
         low_c    = (disp["Severity"]=="🟡 LOW").sum()
 
-        sev1,sev2,sev3 = st.columns(3)
+        sev1, sev2, sev3 = st.columns(3)
         for col_s, label_s, count_s, sub_s, bg_s, bc_s, tc_s in [
-            (sev1,"🔴 HIGH SEVERITY",   high_c,   "Both sensors exceeded OR FAULT state","#1a0808","#dc2626","#f87171"),
-            (sev2,"🟠 MEDIUM SEVERITY", medium_c, "Single sensor exceeded",              "#1a1000","#f97316","#fbbf24"),
-            (sev3,"🟡 LOW SEVERITY",    low_c,    "Quality threshold exceeded",          "#111800","#ca8a04","#fde047"),
+            (sev1,"🔴 HIGH",   high_c,   "Both sensors exceeded or FAULT","#1a0808","#dc2626","#f87171"),
+            (sev2,"🟠 MEDIUM", medium_c, "Single sensor exceeded",        "#1a1000","#f97316","#fbbf24"),
+            (sev3,"🟡 LOW",    low_c,    "Quality threshold exceeded",    "#111800","#ca8a04","#fde047"),
         ]:
             col_s.markdown(f"""<div style="background:{bg_s};border:1px solid {bc_s};border-radius:10px;
                 padding:14px;text-align:center">
                 <div style="font-size:10px;color:#888;font-family:IBM Plex Mono,monospace;
-                    letter-spacing:.1em">{label_s}</div>
+                    letter-spacing:.1em;margin-bottom:6px">{label_s}</div>
                 <div style="font-size:2rem;font-weight:800;color:{tc_s}">{count_s}</div>
-                <div style="font-size:11px;color:#666">{sub_s}</div>
+                <div style="font-size:11px;color:#666;margin-top:4px">{sub_s}</div>
             </div>""", unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
         disp["Triggered By"] = disp.apply(lambda r: " | ".join(filter(None,[
-            f"⚡ Current {r['current_a']:.1f}A > {cur_thresh:.0f}A"         if r["current_a"]>cur_thresh else "",
-            f"📳 Vibration {r['vibration_mm_s']:.2f} > {vib_thresh:.0f}mm/s" if r["vibration_mm_s"]>vib_thresh else "",
-            f"❌ Rejection {r['rejection_rate']:.1f}% > 10%"                 if (r["status"]!="FAULT" and r["rejection_rate"]>10) else "",
-        ])),axis=1)
+            f"⚡ Current {r['current_a']:.1f}A > {cur_thresh:.0f}A"          if r["current_a"]>cur_thresh else "",
+            f"📳 Vibration {r['vibration_mm_s']:.2f} > {vib_thresh:.0f}mm/s"  if r["vibration_mm_s"]>vib_thresh else "",
+            f"❌ Rejection {r['rejection_rate']:.1f}% > 10%"                  if (r["status"]!="FAULT" and r["rejection_rate"]>10) else "",
+        ])), axis=1)
         disp_show = disp[["timestamp","machine_id","status","Severity","current_a",
                            "vibration_mm_s","rejection_rate","Triggered By"]].copy()
         disp_show.columns = ["Timestamp","Machine","Status","Severity",
                              "Current (A)","Vibration (mm/s)","Rejection (%)","Triggered By"]
         disp_show["Timestamp"]     = pd.to_datetime(disp_show["Timestamp"]).dt.strftime("%Y-%m-%d %H:%M")
         disp_show["Rejection (%)"] = disp_show["Rejection (%)"].round(2)
-        st.dataframe(disp_show.sort_values("Timestamp",ascending=False),
+        st.dataframe(disp_show.sort_values("Timestamp", ascending=False),
                      use_container_width=True, hide_index=True,
                      column_config={
                          "Current (A)":     st.column_config.NumberColumn(format="%.1f A"),
@@ -628,52 +432,9 @@ with TAB_MAIN:
         st.download_button("⬇️ Export Alerts as CSV",
             disp_show.to_csv(index=False).encode(),
             file_name=f"plant_alerts_{d_start}_{d_end}.csv", mime="text/csv")
-        insight("<b>Severity:</b> HIGH = both sensors exceeded or FAULT state — act immediately. "
-                "MEDIUM = single sensor exceeded — monitor closely. LOW = quality threshold only — review process.")
-    st.markdown("---")
-
-    # ── RECOMMENDATIONS ──────────────────────────────────────────────────────
-    st.markdown('<div class="sh-primary">Operational Recommendations</div>', unsafe_allow_html=True)
-
-    fault_by_m  = df[df["status"]=="FAULT"].groupby("machine_id").size()
-    top_fault_m = fault_by_m.idxmax() if not fault_by_m.empty else "N/A"
-    high_risk_m = max(machine_risk, key=machine_risk.get) if machine_risk else "N/A"
-
-    r1, r2 = st.columns(2)
-    with r1:
-        st.markdown("##### 🔧 Maintenance Schedule")
-        st.markdown(f"""
-| Priority | Machine | Action | Timeline |
-|----------|---------|--------|----------|
-| 🔴 Critical | **{top_fault_m}** | Full inspection — bearings, terminals, lubrication | **Immediately** |
-| 🟠 High | **{high_risk_m}** | Vibration root-cause analysis | Within 48 hrs |
-| 🟡 Medium | All | Electrical connection torque check | This week |
-| 🟢 Routine | All | Preventive maintenance cycle | Monthly |
-| 🔵 Schedule | All | Sensor baseline recalibration | Quarterly |
-""")
-        for m, rs in machine_risk.items():
-            if rs>=60: st.error(f"🚨 **{m}** risk score **{rs}/100** — immediate inspection.")
-            elif rs>=30: st.warning(f"⚠️ **{m}** risk score **{rs}/100** — inspect within 48 hrs.")
-
-    with r2:
-        st.markdown("##### 🔬 Advanced Sensing Roadmap")
-        st.markdown("""
-| Sensor | Detects | Lead Time |
-|--------|---------|-----------|
-| 🌡️ Thermal Camera | Motor/bearing overheating | 2–3 days early warning |
-| 🎤 Acoustic Emission | Micro-cracks, bearing wear | Sub-mm defect detection |
-| 🛢️ Oil Quality | Lubricant degradation | Prevent seizure failures |
-| 🔄 Torque Sensor | Rotational load anomalies | Isolate fault type |
-| 🌊 Ultrasonic | Internal leaks, cavitation | Non-invasive inspection |
-""")
-        st.info("💡 Combining thermal and acoustic sensors with existing data can reduce unplanned downtime by up to **40%**.")
-
-    best_shift = df.groupby("shift").apply(
-        lambda g:(g["produced_units"].sum()-g["rejected_units"].sum())/max(g["produced_units"].sum(),1)*100).idxmax()
-    st.markdown(f"""> **Summary — {d_start} to {d_end}**
-> Uptime **{uptime_pct:.1f}%** · Yield **{yield_rate:.1f}%** · Faults **{fault_count}** · Anomalies **{len(alerts_df)}**
-> Highest-risk: **{high_risk_m}** ({machine_risk.get(high_risk_m,0)}/100) · Best shift: **{best_shift}**
-> *Prioritise {top_fault_m} maintenance and deploy real-time alerting on sensor thresholds.*""")
+        insight("<b>HIGH</b> = both sensors exceeded or FAULT — act immediately. "
+                "<b>MEDIUM</b> = single sensor exceeded — monitor closely. "
+                "<b>LOW</b> = quality threshold only — review process.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
