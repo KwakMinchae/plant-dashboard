@@ -4,7 +4,6 @@ Stack : Streamlit · Plotly · Pandas
 """
 
 import os
-import requests
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -134,15 +133,6 @@ h1,h2,h3{{font-family:'Syne',sans-serif;}}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CHATBOT STATE
-# ─────────────────────────────────────────────────────────────────────────────
-if "chat_open"      not in st.session_state: st.session_state.chat_open      = False
-if "chat_machine"   not in st.session_state: st.session_state.chat_machine   = "All Machines"
-if "chat_history"   not in st.session_state: st.session_state.chat_history   = []
-if "chat_display"   not in st.session_state: st.session_state.chat_display   = []
-if "chat_setup_done" not in st.session_state: st.session_state.chat_setup_done = False
-
-# ─────────────────────────────────────────────────────────────────────────────
 # DATA
 # ─────────────────────────────────────────────────────────────────────────────
 DATA_FILE = "plant_monitoring_data_1_.xlsm"
@@ -166,111 +156,6 @@ else:
     up = st.file_uploader("Upload plant_monitoring_data_1_.xlsm", type=["xlsm","xlsx","csv"])
     if up: df_raw = load_data(up)
     else:  st.info("Place your `.xlsm` file next to `app.py`, or upload it above."); st.stop()
-
-# CHATBOT — AI assistant function
-# ─────────────────────────────────────────────────────────────────────────────
-def build_chat_context(machine_filter, df_all):
-    """Build data context string for the selected machine scope."""
-    if machine_filter == "All Machines":
-        sub = df_all.copy()
-        scope = "all machines (M1, M2, M3)"
-    else:
-        sub = df_all[df_all["machine_id"] == machine_filter].copy()
-        scope = machine_filter
-
-    if sub.empty:
-        return f"No data available for {scope}."
-
-    fault_c  = (sub["status"] == "FAULT").sum()
-    run_pct  = (sub["status"] == "RUNNING").sum() / len(sub) * 100
-    prod     = sub["produced_units"].sum()
-    rej      = sub["rejected_units"].sum()
-    rej_r    = rej / prod * 100 if prod > 0 else 0
-    avg_vib  = sub["vibration_mm_s"].mean()
-    avg_cur  = sub["current_a"].mean()
-    max_vib  = sub["vibration_mm_s"].max()
-    max_cur  = sub["current_a"].max()
-    date_rng = f"{sub['date'].min()} to {sub['date'].max()}"
-
-    lines = [
-        f"Dataset scope: {scope}, period: {date_rng}.",
-        f"Total readings: {len(sub)}. Running: {run_pct:.1f}%. Fault readings: {fault_c} ({fault_c/len(sub)*100:.1f}%).",
-        f"Production: {prod} units produced, {rej} rejected, rejection rate: {rej_r:.2f}%.",
-        f"Average vibration: {avg_vib:.2f} mm/s (max: {max_vib:.2f} mm/s). Critical threshold: 10 mm/s.",
-        f"Average current: {avg_cur:.2f} A (max: {max_cur:.2f} A). Critical threshold: 60 A.",
-    ]
-
-    if machine_filter == "All Machines":
-        for m in ["M1","M2","M3"]:
-            ms = sub[sub["machine_id"]==m]
-            if ms.empty: continue
-            mf = (ms["status"]=="FAULT").sum()
-            mr = ms["rejected_units"].sum() / max(ms["produced_units"].sum(),1) * 100
-            lines.append(f"{m}: {mf} faults, avg vib {ms['vibration_mm_s'].mean():.2f} mm/s, "
-                         f"avg cur {ms['current_a'].mean():.2f} A, rejection {mr:.2f}%.")
-    
-    # shift breakdown
-    for sh, sg in sub.groupby("shift"):
-        sy = (sg["produced_units"].sum()-sg["rejected_units"].sum())/max(sg["produced_units"].sum(),1)*100
-        lines.append(f"{sh} shift: {sg['produced_units'].sum()} produced, yield {sy:.1f}%, "
-                     f"faults: {(sg['status']=='FAULT').sum()}.")
-
-    return " ".join(lines)
-
-
-def ask_plantiq(question, context, history):
-    system = (
-        "You are PlantIQ, an AI assistant for a manufacturing plant monitoring dashboard. "
-        "You ONLY answer questions based on the sensor data provided in the context below. "
-        "If a question cannot be answered from the data, say clearly: "
-        "'I don\'t have enough information in the dataset to answer that.' "
-        "Answer in plain English for a non-expert operator. Be concise (2-4 sentences). "
-        "Use specific numbers from the context. Never make up data or speculate beyond what is given.\n\n"
-        f"PLANT DATA CONTEXT:\n{context}"
-    )
-    try:
-        api_key = st.secrets.get("ANTHROPIC_API_KEY", os.environ.get("ANTHROPIC_API_KEY",""))
-        resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "Content-Type": "application/json",
-                "anthropic-version": "2023-06-01",
-                "x-api-key": api_key,
-            },
-            json={"model": "claude-haiku-4-5-20251001", "max_tokens": 350,
-                  "system": system,
-                  "messages": history + [{"role": "user", "content": question}]},
-            timeout=25,
-        )
-        data = resp.json()
-        if "content" in data:
-            return data["content"][0]["text"]
-        elif "error" in data:
-            return f"⚠️ API error: {data['error'].get('message','unknown')}"
-        else:
-            return f"⚠️ Unexpected response: {str(data)[:200]}"
-    except Exception as e:
-        return f"⚠️ Could not reach AI: {e}"
-
-
-def get_suggestions(machine_filter):
-    """Return suggested questions based on selected machine."""
-    if machine_filter == "All Machines":
-        return [
-            "Which machine has the most faults?",
-            "What is the overall plant uptime?",
-            "Which shift performs better?",
-            "What is the total production rejection rate?",
-            "Which machine is most at risk?",
-        ]
-    else:
-        return [
-            f"How many faults did {machine_filter} have?",
-            f"What is {machine_filter}\'s average vibration?",
-            f"When did {machine_filter} last enter a FAULT state?",
-            f"What is {machine_filter}\'s rejection rate?",
-            f"Is {machine_filter}\'s current draw normal?",
-        ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -316,59 +201,6 @@ Vibration &gt; 10 mm/s, or Current &gt; 60 A</div>
     st.markdown('<div class="sh-secondary" style="margin-top:16px">THRESHOLDS</div>', unsafe_allow_html=True)
     vib_thresh = st.slider("Vibration alert (mm/s)", 5.0, 15.0, 10.0, 0.5)
     cur_thresh = st.slider("Current alert (A)", 40.0, 80.0, 60.0, 1.0)
-    # ── CHATBOT PANEL ────────────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown('<div class="sh-secondary">⚙️ PLANTIQ AI ASSISTANT</div>', unsafe_allow_html=True)
-
-    # Machine selector
-    chat_machine_opts = ["All Machines"] + sorted(df_raw["machine_id"].unique().tolist())
-    st.session_state.chat_machine = st.selectbox(
-        "Machine scope", chat_machine_opts,
-        index=chat_machine_opts.index(st.session_state.chat_machine),
-        key="chat_machine_select"
-    )
-
-    # Suggested questions
-    suggestions = get_suggestions(st.session_state.chat_machine)
-    st.markdown('<div style="font-size:11px;color:#4a6080;margin-bottom:6px;font-family:IBM Plex Mono,monospace">💡 SUGGESTED QUESTIONS</div>', unsafe_allow_html=True)
-    for sq in suggestions:
-        if st.button(sq, key=f"sq_{sq[:20]}", use_container_width=True):
-            st.session_state._chat_pending = sq
-
-    # Chat input
-    user_input = st.chat_input("Ask PlantIQ...", key="chat_input_sidebar")
-    pending = st.session_state.pop("_chat_pending", None)
-    question = user_input or pending
-
-    if question:
-        ctx = build_chat_context(st.session_state.chat_machine, df_raw)
-        answer = ask_plantiq(question, ctx, st.session_state.chat_history)
-        st.session_state.chat_display.append((question, answer))
-        st.session_state.chat_history.extend([
-            {"role": "user", "content": question},
-            {"role": "assistant", "content": answer},
-        ])
-        if len(st.session_state.chat_history) > 16:
-            st.session_state.chat_history = st.session_state.chat_history[-16:]
-
-    # Display chat history
-    if st.session_state.chat_display:
-        st.markdown("---")
-        for q, a in st.session_state.chat_display[-4:]:
-            st.markdown(f'<div style="background:rgba(37,99,235,.12);border-radius:8px;padding:8px 10px;'
-                        f'margin-bottom:4px;font-size:12px;color:{T["text"]}"><b>You:</b> {q}</div>',
-                        unsafe_allow_html=True)
-            st.markdown(f'<div style="background:{T["insight_bg"]};border-left:3px solid #2563eb;'
-                        f'border-radius:0 8px 8px 0;padding:8px 10px;margin-bottom:8px;'
-                        f'font-size:12px;color:{T["text"]};line-height:1.6">{a}</div>',
-                        unsafe_allow_html=True)
-        if st.button("🗑 Clear chat", key="clear_chat_btn", use_container_width=True):
-            st.session_state.chat_history = []
-            st.session_state.chat_display = []
-            st.rerun()
-
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # FILTER
 # ─────────────────────────────────────────────────────────────────────────────
