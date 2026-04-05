@@ -4,11 +4,17 @@ Stack : Streamlit · Plotly · Pandas
 """
 
 import os
+import io
 import pandas as pd
 import numpy as np
 import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas as rl_canvas
+from reportlab.platypus import Table, TableStyle
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PAGE CONFIG
@@ -264,6 +270,282 @@ def apply_grid(fig, rows=None):
 def insight(text):
     st.markdown(f'<div class="insight">{text}</div>', unsafe_allow_html=True)
 
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PDF EXPORT — one-page shift/day summary
+# ─────────────────────────────────────────────────────────────────────────────
+def generate_pdf(df_in, d_start, d_end, sel_machines, uptime_pct, yield_rate,
+                 fault_count, total_prod, total_rej, machine_risk,
+                 vib_thresh, cur_thresh, oee_data, shift_data):
+    buf = io.BytesIO()
+    W, H = A4
+    c = rl_canvas.Canvas(buf, pagesize=A4)
+
+    # ── colour palette ────────────────────────────────────────────────────────
+    DARK  = colors.HexColor("#080c14")
+    BLUE  = colors.HexColor("#2563eb")
+    LBLUE = colors.HexColor("#93c5fd")
+    GREEN = colors.HexColor("#16a34a")
+    AMBER = colors.HexColor("#ca8a04")
+    RED   = colors.HexColor("#dc2626")
+    LGREY = colors.HexColor("#f0f4f8")
+    MID   = colors.HexColor("#64748b")
+    WHITE = colors.white
+
+    def status_color(val, good, warn):
+        if val >= good: return GREEN
+        if val >= warn: return AMBER
+        return RED
+
+    # ── header bar ────────────────────────────────────────────────────────────
+    c.setFillColor(DARK)
+    c.rect(0, H-28*mm, W, 28*mm, fill=1, stroke=0)
+    c.setFillColor(BLUE)
+    c.rect(0, H-30*mm, W, 2*mm, fill=1, stroke=0)
+
+    c.setFillColor(WHITE)
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(12*mm, H-14*mm, "PlantIQ  —  Shift Handover Report")
+    c.setFont("Helvetica", 9)
+    c.setFillColor(LBLUE)
+    c.drawString(12*mm, H-21*mm,
+                 f"Period: {d_start}  to  {d_end}     Machines: {', '.join(sel_machines)}     "
+                 f"Generated on report export")
+    c.setFillColor(WHITE)
+    c.setFont("Helvetica-Bold", 9)
+    c.drawRightString(W-12*mm, H-14*mm, "EE4409 CA2  |  Manufacturing Plant Monitoring")
+
+    y = H - 38*mm  # start below header
+
+    # ── helper: small section header ─────────────────────────────────────────
+    def section(title, yy):
+        c.setFillColor(BLUE)
+        c.rect(12*mm, yy-2*mm, W-24*mm, 7*mm, fill=1, stroke=0)
+        c.setFillColor(WHITE)
+        c.setFont("Helvetica-Bold", 8)
+        c.drawString(14*mm, yy, title)
+        return yy - 10*mm
+
+    # ── 1. PLANT-WIDE KPIs ────────────────────────────────────────────────────
+    y = section("PLANT-WIDE KPIs", y)
+
+    kpis = [
+        ("Plant Uptime", f"{uptime_pct:.1f}%",
+         "Running hrs / Total hrs × 100%", uptime_pct, 80, 60),
+        ("Yield Rate", f"{yield_rate:.1f}%",
+         "(Produced - Rejected) / Produced × 100%", yield_rate, 90, 75),
+        ("Fault Readings", str(fault_count),
+         "Count of hours where status = FAULT", 100-fault_count/max(1,len(df_in))*100, 95, 80),
+        ("Total Produced", f"{total_prod:,}", "Sum of produced_units", 100, 80, 60),
+        ("Total Rejected", f"{total_rej:,}", "Sum of rejected_units", 0, 0, 0),
+    ]
+
+    box_w = (W - 24*mm) / len(kpis)
+    for ki, (label, val, formula, metric_val, g, w) in enumerate(kpis):
+        bx = 12*mm + ki * box_w
+        c.setFillColor(LGREY)
+        c.roundRect(bx+1*mm, y-16*mm, box_w-2*mm, 18*mm, 2*mm, fill=1, stroke=0)
+        sc = status_color(metric_val, g, w) if g > 0 else MID
+        c.setFillColor(sc)
+        c.rect(bx+1*mm, y+1*mm, box_w-2*mm, 1.5*mm, fill=1, stroke=0)
+        c.setFillColor(colors.HexColor("#1a1a1a"))
+        c.setFont("Helvetica-Bold", 11)
+        c.drawCentredString(bx + box_w/2, y-5*mm, val)
+        c.setFont("Helvetica", 6.5)
+        c.setFillColor(MID)
+        c.drawCentredString(bx + box_w/2, y-10*mm, label)
+        c.setFont("Helvetica", 5.5)
+        c.setFillColor(colors.HexColor("#94a3b8"))
+        c.drawCentredString(bx + box_w/2, y-14.5*mm, formula[:38])
+
+    y -= 22*mm
+
+    # ── 2. OEE ────────────────────────────────────────────────────────────────
+    y = section("OVERALL EQUIPMENT EFFECTIVENESS  (OEE = A × P × Q)", y)
+
+    oee_box_w = (W - 24*mm) / (len(oee_data)+1)
+    for oi, (mach, vals) in enumerate(oee_data.items()):
+        bx = 12*mm + oi * oee_box_w
+        oee_v = vals["oee"]
+        oc = status_color(oee_v, 85, 60)
+        c.setFillColor(LGREY)
+        c.roundRect(bx+1*mm, y-19*mm, oee_box_w-2*mm, 21*mm, 2*mm, fill=1, stroke=0)
+        c.setFillColor(oc)
+        c.rect(bx+1*mm, y+1*mm, oee_box_w-2*mm, 1.5*mm, fill=1, stroke=0)
+        c.setFillColor(colors.HexColor("#1a1a1a"))
+        c.setFont("Helvetica-Bold", 12)
+        c.drawCentredString(bx+oee_box_w/2, y-6*mm, f"{oee_v:.1f}%")
+        c.setFont("Helvetica-Bold", 7)
+        c.setFillColor(MID)
+        c.drawCentredString(bx+oee_box_w/2, y-11*mm, mach)
+        c.setFont("Helvetica", 6)
+        c.setFillColor(colors.HexColor("#64748b"))
+        c.drawCentredString(bx+oee_box_w/2, y-15*mm,
+                            f"A:{vals['avail']:.0f}% P:{vals['perf']:.0f}% Q:{vals['qual']:.0f}%")
+
+    # Plant OEE in last box
+    plant_oee = oee_data.get("Plant",{}).get("oee",0)
+    bx = 12*mm + len(oee_data) * oee_box_w
+    poc = status_color(plant_oee, 85, 60)
+    c.setFillColor(DARK)
+    c.roundRect(bx+1*mm, y-19*mm, oee_box_w-2*mm, 21*mm, 2*mm, fill=1, stroke=0)
+    c.setFillColor(poc)
+    c.rect(bx+1*mm, y+1*mm, oee_box_w-2*mm, 1.5*mm, fill=1, stroke=0)
+    c.setFillColor(WHITE)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawCentredString(bx+oee_box_w/2, y-6*mm, f"{plant_oee:.1f}%")
+    c.setFont("Helvetica-Bold", 7)
+    c.drawCentredString(bx+oee_box_w/2, y-11*mm, "PLANT")
+    c.setFont("Helvetica", 6)
+    c.setFillColor(LBLUE)
+    c.drawCentredString(bx+oee_box_w/2, y-15*mm, "Target >= 85%")
+
+    y -= 26*mm
+
+    # ── 3. MACHINE STATUS ─────────────────────────────────────────────────────
+    y = section("INDIVIDUAL MACHINE STATUS  (Latest reading)", y)
+
+    mc_w = (W - 24*mm) / max(len(sel_machines),1)
+    latest_m = df_in.sort_values("timestamp").groupby("machine_id").last().reset_index()
+
+    for mi, mach in enumerate(sel_machines):
+        bx = 12*mm + mi * mc_w
+        row_m = latest_m[latest_m["machine_id"]==mach]
+        if row_m.empty: continue
+        rm = row_m.iloc[0]
+        st_  = rm["status"]
+        rs   = machine_risk.get(mach, 0)
+        bc   = GREEN if st_=="RUNNING" else (AMBER if st_=="IDLE" else RED)
+        c.setFillColor(LGREY)
+        c.roundRect(bx+1*mm, y-28*mm, mc_w-2*mm, 30*mm, 2*mm, fill=1, stroke=0)
+        c.setFillColor(bc)
+        c.rect(bx+1*mm, y+1*mm, mc_w-2*mm, 2*mm, fill=1, stroke=0)
+        c.setFillColor(colors.HexColor("#1a1a1a"))
+        c.setFont("Helvetica-Bold", 11)
+        c.drawCentredString(bx+mc_w/2, y-5*mm, mach)
+        c.setFillColor(bc)
+        c.setFont("Helvetica-Bold", 8)
+        c.drawCentredString(bx+mc_w/2, y-10*mm, st_)
+        c.setFillColor(MID)
+        c.setFont("Helvetica", 7)
+        cur_c = rm["current_a"]
+        vib_v = rm["vibration_mm_s"]
+        cur_col = RED if cur_c > cur_thresh else colors.HexColor("#1a1a1a")
+        vib_col2 = RED if vib_v > vib_thresh else colors.HexColor("#1a1a1a")
+        c.setFillColor(cur_col)
+        c.drawCentredString(bx+mc_w/2, y-15*mm, f"Current: {cur_c:.1f} A")
+        c.setFillColor(vib_col2)
+        c.drawCentredString(bx+mc_w/2, y-19*mm, f"Vibration: {vib_v:.2f} mm/s")
+        risk_c = GREEN if rs<30 else (AMBER if rs<60 else RED)
+        c.setFillColor(risk_c)
+        c.drawCentredString(bx+mc_w/2, y-23*mm, f"Risk: {rs}/100")
+
+    y -= 35*mm
+
+    # ── 4. SHIFT COMPARISON ───────────────────────────────────────────────────
+    if shift_data:
+        y = section("SHIFT HANDOVER COMPARISON", y)
+        sh_w = (W - 24*mm) / 2
+
+        for si, (shift, sv) in enumerate(shift_data.items()):
+            bx = 12*mm + si * sh_w
+            sc = colors.HexColor("#f59e0b") if shift=="Day" else colors.HexColor("#3b82f6")
+            c.setFillColor(LGREY)
+            c.roundRect(bx+1*mm, y-32*mm, sh_w-2*mm, 34*mm, 2*mm, fill=1, stroke=0)
+            c.setFillColor(sc)
+            c.rect(bx+1*mm, y+1*mm, sh_w-2*mm, 2*mm, fill=1, stroke=0)
+            icon = "Day Shift" if shift=="Day" else "Night Shift"
+            c.setFillColor(colors.HexColor("#1a1a1a"))
+            c.setFont("Helvetica-Bold", 9)
+            c.drawString(bx+3*mm, y-5*mm, icon)
+            rows_data = [
+                ("Units Produced", f"{int(sv.get('produced',0)):,}"),
+                ("Units Rejected", f"{int(sv.get('rejected',0)):,}"),
+                ("Yield Rate",     f"{sv.get('yield_pct',0):.1f}%"),
+                ("Uptime",         f"{sv.get('uptime_pct',0):.1f}%"),
+                ("Fault Hours",    f"{int(sv.get('fault_hrs',0))}"),
+                ("Shift OEE",      f"{sv.get('oee',0):.1f}%"),
+            ]
+            for ri, (lbl, val) in enumerate(rows_data):
+                yy = y - 10*mm - ri*3.8*mm
+                c.setFillColor(MID)
+                c.setFont("Helvetica", 7)
+                c.drawString(bx+3*mm, yy, lbl)
+                c.setFillColor(colors.HexColor("#1a1a1a"))
+                c.setFont("Helvetica-Bold", 7)
+                c.drawRightString(bx+sh_w-3*mm, yy, val)
+
+        y -= 38*mm
+
+    # ── 5. FAULT SUMMARY TABLE ────────────────────────────────────────────────
+    y = section("ANOMALY ALERT SUMMARY", y)
+
+    alerts_in = df_in[
+        (df_in["vibration_mm_s"]>vib_thresh) |
+        (df_in["current_a"]>cur_thresh)
+    ].copy()
+    alerts_in["Severity"] = alerts_in.apply(
+        lambda r: "HIGH" if (r["current_a"]>cur_thresh and r["vibration_mm_s"]>vib_thresh) or r["status"]=="FAULT"
+                  else "MEDIUM", axis=1)
+    summary_rows = [["Machine", "Status", "Severity", "Current (A)", "Vibration (mm/s)", "Timestamp"]]
+    for _, ar in alerts_in.sort_values("timestamp", ascending=False).head(8).iterrows():
+        summary_rows.append([
+            ar["machine_id"], ar["status"], ar["Severity"],
+            f"{ar['current_a']:.1f}", f"{ar['vibration_mm_s']:.2f}",
+            str(ar["timestamp"])[:16]
+        ])
+    if len(summary_rows) == 1:
+        summary_rows.append(["—", "No anomalies detected", "", "", "", ""])
+
+    col_widths = [18*mm, 20*mm, 20*mm, 25*mm, 30*mm, 35*mm]
+    tbl = Table(summary_rows, colWidths=col_widths, rowHeights=5.5*mm)
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND",   (0,0), (-1,0), colors.HexColor("#1e3a5f")),
+        ("TEXTCOLOR",    (0,0), (-1,0), colors.white),
+        ("FONTNAME",     (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTSIZE",     (0,0), (-1,-1), 6.5),
+        ("FONTNAME",     (0,1), (-1,-1), "Helvetica"),
+        ("ROWBACKGROUNDS",(0,1),(-1,-1),[colors.HexColor("#f8fafc"), colors.white]),
+        ("GRID",         (0,0), (-1,-1), 0.3, colors.HexColor("#cbd5e1")),
+        ("ALIGN",        (0,0), (-1,-1), "CENTER"),
+        ("VALIGN",       (0,0), (-1,-1), "MIDDLE"),
+    ]))
+    tbl.wrapOn(c, W-24*mm, 60*mm)
+    tbl.drawOn(c, 12*mm, y - len(summary_rows)*5.5*mm)
+
+    y -= (len(summary_rows) * 5.5 + 4) * mm
+
+    # ── 6. FORMULA REFERENCE ─────────────────────────────────────────────────
+    if y > 25*mm:
+        c.setFillColor(colors.HexColor("#f0f4f8"))
+        c.rect(12*mm, 10*mm, W-24*mm, y-12*mm, fill=1, stroke=0)
+        c.setFillColor(MID)
+        c.setFont("Helvetica-Bold", 6.5)
+        c.drawString(14*mm, y-4*mm, "KEY FORMULAS:")
+        c.setFont("Helvetica", 6)
+        formulas = [
+            f"Uptime = Running hrs / Total hrs × 100%   |   Yield Rate = (Produced − Rejected) / Produced × 100%   |   OEE = Availability × Performance × Quality",
+            f"Rejection Rate (RUNNING) = Rejected / Produced × 100%   |   Rejection Rate (FAULT) = 100% (zero output)   |   Downtime Rate = Fault hrs / Total hrs × 100%",
+            f"Critical thresholds: Vibration > {vib_thresh:.0f} mm/s  or  Current > {cur_thresh:.0f} A   |   World-class OEE target: ≥ 85% (SEMI E10)",
+        ]
+        for fi, fl in enumerate(formulas):
+            c.drawString(14*mm, y - 9*mm - fi*4*mm, fl)
+
+    # ── footer ────────────────────────────────────────────────────────────────
+    c.setFillColor(DARK)
+    c.rect(0, 0, W, 9*mm, fill=1, stroke=0)
+    c.setFillColor(LBLUE)
+    c.setFont("Helvetica", 6.5)
+    c.drawString(12*mm, 3*mm,
+                 f"PlantIQ Manufacturing Dashboard  |  Period: {d_start} to {d_end}  |  "
+                 f"Machines: {', '.join(sel_machines)}  |  EE4409 CA2 Group 3")
+    c.setFillColor(colors.HexColor("#64748b"))
+    c.drawRightString(W-12*mm, 3*mm, "CONFIDENTIAL — INTERNAL USE ONLY")
+
+    c.save()
+    buf.seek(0)
+    return buf.read()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ─────────────────────────────────────────────────────────────────────────────
@@ -618,6 +900,83 @@ with TAB_MAIN:
                 "supervision intensity and scheduling. Incoming shift operators should review the "
                 "fault breakdown above before taking over.")
     st.markdown("---")
+
+    # ── 8. PDF EXPORT ────────────────────────────────────────────────────────
+    st.markdown('<div class="sh-primary">📄 Export Shift Report (PDF)</div>', unsafe_allow_html=True)
+    st.markdown("Generate a one-page printable handover report summarising the current filtered period.")
+
+    # Collect OEE data for PDF
+    oee_for_pdf = {}
+    for mach in sel_machines:
+        msub   = df[df["machine_id"]==mach]
+        n      = len(msub) or 1
+        run_h  = (msub["status"]=="RUNNING").sum()
+        avail  = run_h / n
+        prod_run = msub[msub["status"]=="RUNNING"]["produced_units"]
+        perf   = min(prod_run.sum()/max(prod_run.max()*run_h,1),1.0) if not prod_run.empty else 0
+        good   = msub["produced_units"].sum()-msub["rejected_units"].sum()
+        qual   = good/max(msub["produced_units"].sum(),1)
+        oee_for_pdf[mach] = dict(oee=avail*perf*qual*100, avail=avail*100, perf=perf*100, qual=qual*100)
+
+    pw_avail_p = (df["status"]=="RUNNING").sum()/total
+    pw_run_p   = df[df["status"]=="RUNNING"]["produced_units"]
+    pw_perf_p  = min(pw_run_p.sum()/max(pw_run_p.max()*(df["status"]=="RUNNING").sum(),1),1.0) if not pw_run_p.empty else 0
+    pw_qual_p  = (total_prod-total_rej)/max(total_prod,1)
+    oee_for_pdf["Plant"] = dict(oee=pw_avail_p*pw_perf_p*pw_qual_p*100,
+                                 avail=pw_avail_p*100, perf=pw_perf_p*100, qual=pw_qual_p*100)
+
+    # Collect shift data for PDF
+    shift_for_pdf = {}
+    s_summ = df.groupby("shift").agg(
+        produced =("produced_units","sum"),
+        rejected =("rejected_units","sum"),
+        fault_hrs=("status",lambda x:(x=="FAULT").sum()),
+        run_hrs  =("status",lambda x:(x=="RUNNING").sum()),
+        total_hrs=("status","count"),
+    ).reset_index()
+    for _, sr in s_summ.iterrows():
+        sh_df2   = df[df["shift"]==sr["shift"]]
+        sh_avail2 = sr["run_hrs"]/max(sr["total_hrs"],1)
+        sh_run2   = sh_df2[sh_df2["status"]=="RUNNING"]["produced_units"]
+        sh_perf2  = min(sh_run2.sum()/max(sh_run2.max()*sr["run_hrs"],1),1.0) if not sh_run2.empty else 0
+        sh_qual2  = (sr["produced"]-sr["rejected"])/max(sr["produced"],1)
+        shift_for_pdf[sr["shift"]] = dict(
+            produced  = sr["produced"],
+            rejected  = sr["rejected"],
+            fault_hrs = sr["fault_hrs"],
+            uptime_pct= sr["run_hrs"]/max(sr["total_hrs"],1)*100,
+            yield_pct = (sr["produced"]-sr["rejected"])/max(sr["produced"],1)*100,
+            oee       = sh_avail2*sh_perf2*sh_qual2*100,
+        )
+
+    if st.button("⬇️ Generate & Download PDF Report", use_container_width=True, type="primary"):
+        with st.spinner("Generating PDF..."):
+            pdf_bytes = generate_pdf(
+                df_in        = df,
+                d_start      = d_start,
+                d_end        = d_end,
+                sel_machines = sel_machines,
+                uptime_pct   = uptime_pct,
+                yield_rate   = yield_rate,
+                fault_count  = fault_count,
+                total_prod   = total_prod,
+                total_rej    = total_rej,
+                machine_risk = machine_risk,
+                vib_thresh   = vib_thresh,
+                cur_thresh   = cur_thresh,
+                oee_data     = oee_for_pdf,
+                shift_data   = shift_for_pdf,
+            )
+        st.download_button(
+            label="📄 Download Shift Report PDF",
+            data=pdf_bytes,
+            file_name=f"PlantIQ_Shift_Report_{d_start}_{d_end}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+        insight("PDF generated! Click the download button above to save your shift handover report. "
+                "The report includes plant KPIs, OEE breakdown, machine status, shift comparison, "
+                "anomaly summary, and key formula reference — all on one page.")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
