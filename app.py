@@ -574,8 +574,54 @@ TAB_MAIN, TAB_ADV = st.tabs(["📊  Live Dashboard", "🔬  Advanced Analysis"])
 # ══════════════════════════════════════════════════════════════════════════════
 with TAB_MAIN:
 
-    # ── 1. ALERT BANNER ──────────────────────────────────────────────────────
-    if not alerts_df.empty:
+    # ── 1. ALERT BANNER + AUDIO NOTIFICATION ────────────────────────────────
+    active_faults = df[df["status"]=="FAULT"]
+    has_fault = not active_faults.empty
+
+    if has_fault:
+        fault_machines = active_faults["machine_id"].unique().tolist()
+        # Pulsing red banner
+        st.markdown(f"""
+        <div style="background:linear-gradient(135deg,#1a0808,#2a0f0f);
+                    border:2px solid #ef4444;border-radius:12px;
+                    padding:18px 24px;margin-bottom:12px;
+                    animation:fault-pulse 1.5s ease-in-out infinite;
+                    box-shadow:0 0 30px rgba(239,68,68,0.4);">
+          <div style="font-family:Syne,sans-serif;font-size:1.3rem;font-weight:800;
+                      color:#f87171;margin-bottom:6px;">
+            🚨 FAULT DETECTED — {", ".join(fault_machines)}
+          </div>
+          <div style="font-size:12px;color:#9a6060;font-family:IBM Plex Mono,monospace;">
+            {len(active_faults)} fault reading(s) in selected period &nbsp;·&nbsp;
+            Machine(s): <b style="color:#f87171">{", ".join(fault_machines)}</b> &nbsp;·&nbsp;
+            Immediate inspection required
+          </div>
+        </div>
+        <script>
+        (function() {{
+            try {{
+                var ctx = new (window.AudioContext || window.webkitAudioContext)();
+                function beep(freq, duration, vol) {{
+                    var osc = ctx.createOscillator();
+                    var gain = ctx.createGain();
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.frequency.value = freq;
+                    osc.type = "square";
+                    gain.gain.setValueAtTime(vol, ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+                    osc.start(ctx.currentTime);
+                    osc.stop(ctx.currentTime + duration);
+                }}
+                beep(880, 0.15, 0.3);
+                setTimeout(function(){{ beep(880, 0.15, 0.3); }}, 200);
+                setTimeout(function(){{ beep(660, 0.3, 0.25); }}, 400);
+            }} catch(e) {{}}
+        }})();
+        </script>
+        """, unsafe_allow_html=True)
+
+    elif not alerts_df.empty:
         top_machine = alerts_df["machine_id"].value_counts().idxmax()
         st.markdown(f"""<div class="alert-banner">
           <div class="alert-banner-title">⚠️ {len(alerts_df)} Anomalies Detected</div>
@@ -585,7 +631,8 @@ with TAB_MAIN:
             Anomaly rate: {len(alerts_df)/total*100:.1f}% of readings
           </div>
         </div>""", unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # ── 2. KPI CARDS ─────────────────────────────────────────────────────────
     st.markdown('<div class="sh-primary">Plant Overview</div>', unsafe_allow_html=True)
@@ -662,14 +709,14 @@ with TAB_MAIN:
             </div>""", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown(f'''<div class="insight" style="font-size:11px">
-    <b>Reading these cards:</b> All values shown are from the <b>last hourly reading</b> within the selected date range ({d_start} → {d_end}) — not averages.
-    &nbsp;·&nbsp; <b>Status</b> = operational state in that final hour (RUNNING / IDLE / FAULT).
-    &nbsp;·&nbsp; <b>Motor Current</b> = electrical load drawn in that hour (A). <span style="color:#f87171">Red = exceeds {cur_thresh:.0f} A threshold.</span>
-    &nbsp;·&nbsp; <b>Vibration</b> = mechanical velocity in that hour (mm/s). <span style="color:#f87171">Red = exceeds {vib_thresh:.0f} mm/s threshold.</span>
-    &nbsp;·&nbsp; <b>Units Produced / Rejected</b> = output in that final hour only (0 if IDLE or FAULT).
-    &nbsp;·&nbsp; <b>Risk Score</b> = composite 0–100 index across the <i>full selected period</i>: Fault rate (40%) + Vib exceedances (30%) + Cur exceedances (20%) + Rejection rate (10%).
-    </div>''', unsafe_allow_html=True)
+    st.markdown(f'<div class="insight" style="font-size:11px">'
+        f'<b>Reading these cards:</b> All values shown are from the <b>last hourly reading</b> within the selected date range ({d_start} to {d_end}) — not averages. '
+        f'&nbsp;&middot;&nbsp; <b>Status</b> = operational state in that final hour (RUNNING / IDLE / FAULT). '
+        f'&nbsp;&middot;&nbsp; <b>Motor Current</b> = electrical load drawn in that hour (A). <span style="color:#f87171">Red = exceeds {cur_thresh:.0f} A threshold.</span> '
+        f'&nbsp;&middot;&nbsp; <b>Vibration</b> = mechanical velocity in that hour (mm/s). <span style="color:#f87171">Red = exceeds {vib_thresh:.0f} mm/s threshold.</span> '
+        f'&nbsp;&middot;&nbsp; <b>Units Produced / Rejected</b> = output in that final hour only (0 if IDLE or FAULT). '
+        f'&nbsp;&middot;&nbsp; <b>Risk Score</b> = composite 0-100 index across the full selected period: Fault rate (40%) + Vib exceedances (30%) + Cur exceedances (20%) + Rejection rate (10%).'
+        f'</div>', unsafe_allow_html=True)
     st.markdown("---")
 
     # ── 5. OEE ───────────────────────────────────────────────────────────────
